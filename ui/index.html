@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rodex</title>
+  <link rel="stylesheet" href="/styles/base.css" />
+  <link rel="stylesheet" href="/styles/landing.css" />
+</head>
+<body class="landing-body">
+
+  <div class="landing-logo">
+    <div class="landing-logo-icon">⬡</div>
+    <h1>Rodex</h1>
+    <p>Security &bull; Bug Detection &bull; Autonomous Fixes &bull; Real-time Streaming</p>
+  </div>
+
+  <div class="upload-cards">
+    <div class="upload-card" id="card-folder" title="Upload an entire project folder">
+      <span class="upload-card-icon">📁</span>
+      <span class="upload-card-label">Upload Folder</span>
+      <span class="upload-card-sub">drag & drop</span>
+    </div>
+    <div class="upload-card" id="card-file" title="Upload one or more .py files">
+      <span class="upload-card-icon">📄</span>
+      <span class="upload-card-label">Upload File</span>
+      <span class="upload-card-sub">drag & drop</span>
+    </div>
+    <div class="upload-card" id="card-write" title="Write or paste Python code directly">
+      <span class="upload-card-icon">✏️</span>
+      <span class="upload-card-label">Write Code</span>
+      <span class="upload-card-sub">in editor</span>
+    </div>
+  </div>
+
+  <input type="file" id="hidden-file-input" multiple accept=".py,.js,.ts,.java,.go,.rs" />
+  <input type="file" id="hidden-folder-input" webkitdirectory multiple />
+
+  <div class="divider">or paste code directly</div>
+
+  <div class="paste-area">
+    <textarea id="paste-textarea" placeholder="# Paste your Python code here...&#10;&#10;def get_user(user_id):&#10;    query = f&quot;SELECT * FROM users WHERE id = {user_id}&quot;&#10;    ..."></textarea>
+    <button class="btn-analyze" id="btn-analyze" disabled>
+      Analyze Code &#8594;
+    </button>
+  </div>
+
+  <script type="module" src="/ui/landing.js"></script>
+</body>
+</html>

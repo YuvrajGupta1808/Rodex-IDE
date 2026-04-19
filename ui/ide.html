@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Code Review IDE</title>
+  <link rel="stylesheet" href="/styles/base.css?v=4" />
+  <link rel="stylesheet" href="/styles/ide.css?v=4" />
+  <!-- Monaco Editor from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+</head>
+<body>
+<div class="ide-layout">
+
+  <!-- ── TITLEBAR ── -->
+  <header class="titlebar">
+    <div class="titlebar-left">
+      <div class="titlebar-logo">CR</div>
+      <span class="titlebar-title">Code Review IDE</span>
+      <span class="session-badge" id="session-label">no session</span>
+    </div>
+    <div class="titlebar-right">
+      <div class="font-size-controls" title="Adjust font size">
+        <button class="btn-icon btn-font" id="btn-font-decrease" title="Decrease font size">A−</button>
+        <span class="font-size-label" id="font-size-label">13</span>
+        <button class="btn-icon btn-font" id="btn-font-increase" title="Increase font size">A+</button>
+      </div>
+      <button class="btn-run" id="btn-run">Run Analysis</button>
+      <button class="btn-icon" id="btn-home" title="Home">Home</button>
+      <button class="btn-icon" id="btn-settings" title="Settings">Settings</button>
+    </div>
+  </header>
+
+  <!-- ── BODY (flex row) ── -->
+  <div class="ide-body">
+
+    <!-- ── FILE TREE ── -->
+    <aside class="file-tree-panel" id="file-tree-panel">
+      <div class="panel-header">
+        Explorer
+      </div>
+      <div class="file-tree-items" id="file-tree"></div>
+      <button class="tree-add-btn" id="btn-add-file">+ Add File</button>
+    </aside>
+
+    <!-- ── RESIZE: file tree | editor ── -->
+    <div class="resize-col" id="resize-filetree" title="Drag to resize"></div>
+
+    <!-- ── CENTER (editor + bottom panels) ── -->
+    <div class="ide-center">
+      <main class="editor-panel">
+        <div class="tab-bar" id="tab-bar"></div>
+        <div id="monaco-editor"></div>
+      </main>
+
+      <!-- ── RESIZE: editor | bottom panels ── -->
+      <div class="resize-row" id="resize-findings" title="Drag to resize"></div>
+
+      <!-- ── BOTTOM PANEL (Tabs: Problems | Output | Log) ── -->
+      <section class="bottom-panel-container" id="bottom-panel">
+        <!-- Tab Bar -->
+        <div class="bottom-tab-bar">
+          <button class="bottom-tab active" data-tab="problems" id="tab-problems">
+            Problems <span id="findings-count" class="tab-badge">0</span>
+          </button>
+          <button class="bottom-tab" data-tab="output" id="tab-output">
+            Output
+          </button>
+          <button class="bottom-tab" data-tab="log" id="tab-log">
+            Log
+          </button>
+          <button class="bottom-tab" data-tab="working" id="tab-working">
+            Terminal
+          </button>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="bottom-tab-content">
+          <!-- Problems Tab -->
+          <div class="tab-pane active" id="pane-problems">
+            <div class="findings-toolbar" id="findings-toolbar">
+              <div class="findings-severity-summary" id="findings-severity-summary"></div>
+              <div class="findings-filter-row" id="findings-filter-row"></div>
+            </div>
+            <div class="panel-content" id="findings-list">
+              <div class="empty-state">
+                <span>Run analysis to see problems</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Output Tab -->
+          <div class="tab-pane" id="pane-output">
+            <div class="thought-stream" id="thought-stream">
+              <div class="empty-state">
+                <span>Agent reasoning will appear here</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Log Tab -->
+          <div class="tab-pane" id="pane-log">
+            <div class="panel-content" id="tool-log">
+              <div class="empty-state">
+                <span>No tool calls yet</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Terminal Tab -->
+          <div class="tab-pane" id="pane-working">
+            <div class="panel-content terminal-panel" id="working-content">
+              <div class="terminal-output" id="terminal-output">
+                <div class="empty-state">
+                  <span>Run commands like `ls`, `pwd`, `cd ..`</span>
+                </div>
+              </div>
+              <form class="terminal-input-row" id="terminal-form">
+                <span class="terminal-prompt" id="terminal-prompt">$</span>
+                <input
+                  id="terminal-input"
+                  class="terminal-input"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="Type command and press Enter"
+                />
+              </form>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ── RESIZE: editor | agents ── -->
+    <div class="resize-col" id="resize-agents" title="Drag to resize"></div>
+
+    <!-- ── AGENTS PANEL (right) ── -->
+    <aside class="agents-panel" id="agents-panel">
+      <div class="right-panel-sections">
+
+        <!-- Agent Status -->
+        <div class="section" id="section-agents">
+          <div class="section-header" onclick="toggleSection('agents')">
+            Agents <span id="agents-chevron">[−]</span>
+          </div>
+          <div class="section-body" id="agents-body">
+            <div class="agent-item" id="agent-coordinator">
+              <span class="dot dot-idle" id="dot-coordinator"></span>
+              <span class="agent-name">Coordinator</span>
+              <span class="agent-status-label idle" id="status-coordinator">IDLE</span>
+            </div>
+            <div class="agent-item" id="agent-security">
+              <span class="dot dot-idle" id="dot-security"></span>
+              <span class="agent-name">Security</span>
+              <span class="agent-status-label idle" id="status-security">IDLE</span>
+            </div>
+            <div class="agent-item" id="agent-bug_detection">
+              <span class="dot dot-idle" id="dot-bug_detection"></span>
+              <span class="agent-name">Bug Detection</span>
+              <span class="agent-status-label idle" id="status-bug_detection">IDLE</span>
+            </div>
+            <div class="agent-item" id="agent-fix">
+              <span class="dot dot-idle" id="dot-fix"></span>
+              <span class="agent-name">Fix Agent</span>
+              <span class="agent-status-label idle" id="status-fix">IDLE</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Execution Plan -->
+        <div class="section" id="section-plan">
+          <div class="section-header" onclick="toggleSection('plan')">
+            Execution Plan <span id="plan-chevron">[−]</span>
+          </div>
+          <div class="section-body" id="plan-body">
+            <div class="empty-state" style="height:50px; font-size:11px;">
+              <span style="color:var(--text-muted)">Run analysis to see plan</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+  </div><!-- /.ide-body -->
+</div><!-- /.ide-layout -->
+
+<!-- Fix popup (absolutely positioned over editor) -->
+<div class="fix-popup" id="fix-popup" style="display:none;">
+  <div class="fix-popup-title">Suggested Fix</div>
+  <div class="fix-popup-body" id="fix-popup-body"></div>
+  <div class="fix-popup-actions">
+    <button class="btn-dismiss" id="fix-popup-dismiss">Dismiss</button>
+    <button class="btn-apply-fix" id="fix-popup-apply">Apply Fix</button>
+  </div>
+</div>
+
+<input type="file" id="hidden-file-input-ide" multiple accept=".py,.js,.ts" style="display:none" />
+
+<script type="module" src="/ui/ide.js?v=11"></script>
+</body>
+</html>

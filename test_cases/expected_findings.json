@@ -1,0 +1,65 @@
+{
+  "sql_injection.py": {
+    "findings": [
+      {"type": "security", "severity": "critical", "category": "sql_injection", "line": 7, "description": "User input directly concatenated into SQL query via f-string"},
+      {"type": "security", "severity": "critical", "category": "sql_injection", "line": 13, "description": "User input interpolated into SQL query via string formatting"}
+    ]
+  },
+  "null_reference.py": {
+    "findings": [
+      {"type": "bug", "severity": "high", "category": "null_reference", "line": 4, "description": "Variable 'user' may be None; accessing .email will raise AttributeError"},
+      {"type": "bug", "severity": "medium", "category": "null_reference", "line": 10, "description": "Variable 'db' may be None; accessing .host will raise AttributeError"}
+    ]
+  },
+  "hardcoded_secret.py": {
+    "findings": [
+      {"type": "security", "severity": "critical", "category": "hardcoded_secret", "line": 4, "description": "API key hardcoded in source code"},
+      {"type": "security", "severity": "critical", "category": "hardcoded_secret", "line": 5, "description": "Database password hardcoded in source code"},
+      {"type": "security", "severity": "high", "category": "hardcoded_secret", "line": 12, "description": "Hardcoded database credentials in dict literal"}
+    ]
+  },
+  "race_condition.py": {
+    "findings": [
+      {"type": "bug", "severity": "high", "category": "race_condition", "line": 8, "description": "Non-atomic read-modify-write on shared counter without lock — race condition"}
+    ]
+  },
+  "xss_vulnerability.py": {
+    "findings": [
+      {"type": "security", "severity": "high", "category": "xss", "line": 9, "description": "User input from query string embedded unescaped in HTML response"},
+      {"type": "security", "severity": "high", "category": "xss", "line": 15, "description": "User form input embedded unescaped in HTML template"}
+    ]
+  },
+  "type_coercion.py": {
+    "findings": [
+      {"type": "bug", "severity": "medium", "category": "type_mismatch", "line": 3, "description": "No type check on operands — string + int produces concatenation instead of addition"},
+      {"type": "bug", "severity": "medium", "category": "type_mismatch", "line": 7, "description": "discount_pct from user input is string; arithmetic on string causes TypeError"}
+    ]
+  },
+  "resource_leak.py": {
+    "findings": [
+      {"type": "bug", "severity": "medium", "category": "resource_leak", "line": 3, "description": "File opened without 'with' statement — handle leaked on exception"},
+      {"type": "bug", "severity": "medium", "category": "resource_leak", "line": 15, "description": "SQLite connection never closed — resource leak"}
+    ]
+  },
+  "auth_bypass.py": {
+    "findings": [
+      {"type": "security", "severity": "critical", "category": "auth_flaw", "line": 3, "description": "Auth bypass: truthy string value of is_admin allows privilege escalation"},
+      {"type": "security", "severity": "high", "category": "auth_flaw", "line": 8, "description": "Timing attack: plain == comparison on password instead of hmac.compare_digest"},
+      {"type": "security", "severity": "high", "category": "auth_flaw", "line": 19, "description": "Missing 401 response when token is absent — request falls through silently"}
+    ]
+  },
+  "logic_error.py": {
+    "findings": [
+      {"type": "bug", "severity": "medium", "category": "off_by_one", "line": 4, "description": "range(len(numbers)-1) skips last element — off-by-one in max search"},
+      {"type": "bug", "severity": "medium", "category": "logic_error", "line": 10, "description": "Inverted condition: returns True for invalid ages and False for valid ones"},
+      {"type": "bug", "severity": "low", "category": "off_by_one", "line": 16, "description": "Page slice uses page_size-1 instead of page_size — last item excluded"}
+    ]
+  },
+  "error_swallowing.py": {
+    "findings": [
+      {"type": "bug", "severity": "high", "category": "error_swallowing", "line": 5, "description": "Bare except clause swallows all exceptions silently"},
+      {"type": "bug", "severity": "medium", "category": "error_swallowing", "line": 11, "description": "ZeroDivisionError caught and ignored — function returns None silently"},
+      {"type": "bug", "severity": "medium", "category": "error_swallowing", "line": 18, "description": "Exception swallowed with no logging — caller cannot distinguish success from failure"}
+    ]
+  }
+}
