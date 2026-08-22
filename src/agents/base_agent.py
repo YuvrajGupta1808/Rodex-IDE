@@ -58,13 +58,21 @@ class BaseAgent(ABC):
         instructions: str,
         tools: list[Any],
     ) -> str:
-        """Run an OpenAI Agents SDK agent and return the final text response."""
+        """Run an OpenAI Agents SDK agent and return the final text response.
+
+        If MCP servers are configured (mcp_servers.json), the ones allowed
+        for this agent are attached, giving the specialist extra context
+        tools (filesystem, git, dependency data) during its review.
+        """
         try:
             from agents import Agent, Runner  # type: ignore
+
+            mcp_servers = await self._mcp_servers()
             agent = Agent(
                 name=self.agent_id,
                 instructions=instructions,
                 tools=tools,
+                mcp_servers=mcp_servers,
                 model="gpt-4o",
             )
             result = await Runner.run(agent, input=self._build_prompt(context))
@@ -72,6 +80,16 @@ class BaseAgent(ABC):
         except ImportError:
             # Fallback: direct OpenAI API call
             return await self._run_openai_direct(context, instructions)
+
+    async def _mcp_servers(self) -> list[Any]:
+        """Connected MCP servers this agent may use ([] when unconfigured)."""
+        manager = getattr(self, "mcp_manager", None)
+        if manager is None:
+            return []
+        try:
+            return await manager.servers_for(self.agent_id)
+        except Exception:  # noqa: BLE001 - MCP must never break a review
+            return []
 
     async def _run_openai_direct(
         self, context: SharedContext, instructions: str

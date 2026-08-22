@@ -28,7 +28,6 @@ class CoordinatorAgent(BaseAgent):
         agent_drive: AgentDrive,
         session_id: str,
     ) -> None:
-        from ..events.bus import AsyncEventBus
         # Coordinator doesn't need its own emitter constructor from base; build directly
         self.agent_id = "coordinator"
         self.emitter = emitter
@@ -40,6 +39,21 @@ class CoordinatorAgent(BaseAgent):
         raise NotImplementedError("Use run_review() instead")
 
     async def run_review(
+        self, context: SharedContext, event_bus: Any
+    ) -> ReviewResult:
+        # MCP manager is created up front and closed in the finally block so
+        # server processes never outlive the review, even on failure.
+        from ..mcp_tools import MCPServerManager
+        self._mcp_manager = MCPServerManager()
+        try:
+            return await self._run_review(context, event_bus)
+        except Exception as exc:
+            await self.emitter.error(f"Review failed: {exc}")
+            raise
+        finally:
+            await self._mcp_manager.aclose()
+
+    async def _run_review(
         self, context: SharedContext, event_bus: Any
     ) -> ReviewResult:
         start = time.monotonic()
@@ -72,6 +86,15 @@ class CoordinatorAgent(BaseAgent):
         fix_agent = FixAgent(
             "fix", fix_emitter, self.sandbox_manager, self.agent_drive
         )
+
+        # Attach MCP server manager: specialists gain per-agent context tools
+        # (filesystem, git, dependency data) declared in mcp_servers.json.
+        if self._mcp_manager.configured:
+            await self.emitter.thinking(
+                "MCP servers configured — attaching context tools to specialist agents"
+            )
+        for specialist in (security_agent, bug_agent, fix_agent):
+            specialist.mcp_manager = self._mcp_manager
 
         # Step 4: Delegate to Security + Bug agents in parallel
         await self.emitter.emit(EventType.AGENT_DELEGATED, {
@@ -149,7 +172,7 @@ class CoordinatorAgent(BaseAgent):
     def _deduplicate(self, findings: list[Finding]) -> list[Finding]:
         seen: dict[tuple, Finding] = {}
         for f in findings:
-            # Normalize line number to nearest 5 for tolerance
+            # Bucket line numbers to the nearest 2 so near-duplicate findings collapse
             key = (f.file, round(f.line / 2) * 2, f.category)
             if key not in seen:
                 seen[key] = f

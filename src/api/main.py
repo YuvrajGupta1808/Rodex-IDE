@@ -36,9 +36,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS: default to local dev origins only. A wildcard here would let any
+# website script against this API from the user's browser (CSRF), which is
+# unacceptable for endpoints that touch the filesystem or run commands.
+# Override with RODEX_ALLOWED_ORIGINS (comma-separated) when deploying.
+_default_origins = "http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173"
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("RODEX_ALLOWED_ORIGINS", _default_origins).split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )

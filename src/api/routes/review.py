@@ -20,6 +20,9 @@ router = APIRouter(prefix="/api", tags=["review"])
 _sessions: dict[str, ReviewSession] = {}
 _terminal_cwds: dict[str, str] = {}
 
+MAX_UPLOAD_FILES = 20
+MAX_UPLOAD_BYTES = 1024 * 1024  # 1 MB per file
+
 
 class ReviewRequest(BaseModel):
     files: dict[str, str]  # filename -> source code
@@ -72,9 +75,19 @@ async def upload_review(
     sandbox_manager: SandboxManager = Depends(get_sandbox_manager),
     agent_drive: AgentDrive = Depends(get_agent_drive),
 ) -> ReviewResponse:
+    if len(files) > MAX_UPLOAD_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many files: {len(files)} > {MAX_UPLOAD_FILES}",
+        )
     file_contents: dict[str, str] = {}
     for upload in files:
         content = await upload.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large: {upload.filename} exceeds {MAX_UPLOAD_BYTES // 1024} KB",
+            )
         file_contents[upload.filename or "unnamed.py"] = content.decode("utf-8", errors="replace")
 
     session = ReviewSession.create(file_contents)
@@ -104,6 +117,14 @@ async def get_session(session_id: str) -> dict:
 
 @router.post("/terminal/exec", response_model=TerminalResponse)
 async def execute_terminal_command(body: TerminalRequest) -> TerminalResponse:
+    # Host-shell execution is opt-in: this endpoint runs commands on the
+    # machine hosting the API, so it stays disabled unless explicitly enabled
+    # for local development (RODEX_ENABLE_TERMINAL=1).
+    if os.getenv("RODEX_ENABLE_TERMINAL") != "1":
+        raise HTTPException(
+            status_code=403,
+            detail="Terminal is disabled. Set RODEX_ENABLE_TERMINAL=1 to enable it for local development.",
+        )
     command = body.command.strip()
     cwd = _terminal_cwds.get(body.session_id, os.getcwd())
 

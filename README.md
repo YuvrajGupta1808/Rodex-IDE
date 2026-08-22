@@ -10,6 +10,33 @@ A Cursor-style IDE that uses 4 AI agents (powered by OpenAI GPT-4o + Blaxel sand
 - **Autonomous fixes** — Blaxel `fastapply` edits files at 2000+ tokens/sec, verified via `py_compile`
 - **Blaxel sandboxes** — No Docker needed; Blaxel provides the Python runtime
 - **Agent Drive** — Shared POSIX filesystem mounts to all agent sandboxes simultaneously
+- **MCP context tools** — Specialist agents attach tools from configurable MCP servers (filesystem, git, fetch) with per-agent allowlists, grounding reviews in richer context than raw file text
+
+## MCP Integration
+
+Each specialist agent can be granted tools from external [Model Context Protocol](https://modelcontextprotocol.io) servers. Declare servers in `mcp_servers.json` at the repo root (copy `mcp_servers.example.json` to start):
+
+```json
+{
+  "servers": {
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "./"],
+      "agents": ["security", "bug_detection"]
+    }
+  }
+}
+```
+
+- `agents` restricts which specialists may use a server's tools (omit it to allow all) — e.g. give the security agent `fetch` for advisory lookups while keeping the fix agent offline
+- Servers connect lazily per review session, are shared across agents, and are cleaned up when the review completes — even when the review fails
+- A missing config file, a malformed entry, or a server that fails to start all degrade gracefully — reviews run exactly as before, with no MCP tools attached
+
+## Security Defaults
+
+- **CORS** is restricted to localhost dev origins; override with `RODEX_ALLOWED_ORIGINS` (comma-separated). No wildcard — a wildcard would let any website script against an API that touches the filesystem.
+- **The in-IDE terminal is disabled by default** because it executes on the host. Set `RODEX_ENABLE_TERMINAL=1` to enable it for local development.
+- **Uploads are capped** at 20 files / 1 MB per file.
 
 ## Setup
 

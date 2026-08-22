@@ -13,3 +13,4 @@ htmlcov/
 .coverage
 metrics.json
 node_modules/
+mcp_servers.json
