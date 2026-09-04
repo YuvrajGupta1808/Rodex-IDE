@@ -51,11 +51,23 @@ class _FindingNarrator:
     _LINE = re.compile(r'"line"\s*:\s*(\d+)')
     _DESCRIPTION = re.compile(r'"description"\s*:\s*"((?:[^"\\]|\\.)*)"')
 
+    # The JSON answer begins at the first fence or bare array. Reasoning
+    # before it can quote field names ("description": ...) and would
+    # otherwise be re-matched on every chunk, announcing the same finding
+    # hundreds of times.
+    _ANSWER_START = re.compile(r"```|\[")
+
     def __init__(self) -> None:
         self._announced = 0
 
+    @classmethod
+    def _answer_only(cls, text: str) -> str:
+        match = cls._ANSWER_START.search(text)
+        return text[match.start():] if match else ""
+
     def new_lines(self, text: str) -> list[str]:
         """Progress lines for findings that are complete but unannounced."""
+        text = self._answer_only(text)
         descriptions = self._DESCRIPTION.findall(text)
         severities = self._SEVERITY.findall(text)
         categories = self._CATEGORY.findall(text)

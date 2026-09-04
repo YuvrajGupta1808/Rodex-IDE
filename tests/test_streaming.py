@@ -188,3 +188,43 @@ async def test_json_answer_is_never_shown_as_reasoning():
     joined = " ".join(emitter.messages)
     assert '"severity"' not in joined
     assert "```" not in joined
+
+
+REASONING_QUOTING_FIELDS = (
+    "**Assessing the code**\n\n"
+    'I will report a "description": for each issue I find, '
+    'with a "severity": and a "line": number.\n\n'
+    "**Concluding**\n\nHere is the result.\n\n"
+    '```json\n[{"file": "m.py", "line": 4, "severity": "high",'
+    ' "category": "resource_leak", "description": "Connection never closed."}]\n```'
+)
+
+
+@pytest.mark.asyncio
+async def test_reasoning_that_quotes_field_names_is_not_narrated_as_findings():
+    """Regression: one review emitted 3,678 thinking events instead of ~50.
+
+    The narrator scanned the whole accumulated response, so field names
+    quoted in the model's reasoning matched on every chunk and the same
+    lines were announced hundreds of times.
+    """
+    emitter = _Emitter()
+
+    await stream_thinking(_Stream(REASONING_QUOTING_FIELDS, 25), emitter)
+
+    findings = [m for m in emitter.messages if m.startswith("[HIGH]")]
+    assert len(findings) == 1
+
+    joined = " ".join(emitter.messages)
+    assert "Connection never closed." in joined
+    # The reasoning is still shown, just not mistaken for a finding.
+    assert "Assessing the code" in joined
+
+
+@pytest.mark.asyncio
+async def test_each_finding_is_announced_once_across_many_small_chunks():
+    emitter = _Emitter()
+
+    await stream_thinking(_Stream(RESPONSE, 3), emitter)
+
+    assert " ".join(emitter.messages).count("[CRITICAL]") == 1
