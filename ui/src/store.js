@@ -21,6 +21,7 @@ export const store = {
   activity: [],      // [{kind, agentId, ...}]
   _openStepId: null,
   lastError: null,
+  running: false,
   toolCalls: [],     // [{agentId, toolName, inputs, output, durationMs, ok}]
   findings: [],      // Finding objects
   fixProposals: {},  // findingId -> FixProposal
@@ -54,8 +55,10 @@ export const store = {
         break;
 
       case 'agent_started':
+        this.running = true;
         this._setAgentState(agent_id, 'thinking');
         this.notify('agents');
+        this.notify('plan');
         break;
 
       case 'thinking':
@@ -77,7 +80,19 @@ export const store = {
           title: data.title, detail: data.detail, outcome: null,
           summary: '', children: [],
         });
+        // The coordinator chooses its own steps, so the execution plan is
+        // built from what it actually does rather than a fixed script.
+        this.planSteps = [
+          ...this.planSteps,
+          {
+            step: this.planSteps.length + 1,
+            stepId: data.step_id,
+            description: data.title,
+            status: 'active',
+          },
+        ];
         this.notify('thoughts');
+        this.notify('plan');
         break;
 
       case 'step_completed': {
@@ -87,7 +102,13 @@ export const store = {
           step.summary = data.summary;
         }
         this._openStepId = null;
+        this.planSteps = this.planSteps.map(s =>
+          s.stepId === data.step_id
+            ? { ...s, status: data.outcome === 'failed' ? 'failed' : 'done' }
+            : s
+        );
         this.notify('thoughts');
+        this.notify('plan');
         break;
       }
 
@@ -164,6 +185,7 @@ export const store = {
 
       case 'review_completed':
         this.fixedFiles = data?.fixed_files || {};
+        this.running = false;
         this._setAllCompleted();
         this.notify('plan');
         this.notify('completed');
@@ -178,6 +200,7 @@ export const store = {
           kind: 'failure', agentId: agent_id, text: data?.message || 'Unknown error',
         });
         this.lastError = data?.message || 'Unknown error';
+        this.running = false;
         this.notify('thoughts');
         this.notify('agents');
         this.notify('failed');
@@ -217,16 +240,16 @@ export const store = {
   },
 
   _advancePlan() {
-    const idx = this.planSteps.findIndex(s => s.status === 'pending');
-    if (idx !== -1) {
-      this.planSteps[idx] = { ...this.planSteps[idx], status: 'active' };
-      if (idx > 0) this.planSteps[idx - 1] = { ...this.planSteps[idx - 1], status: 'done' };
-    }
+    // Steps now open and close on their own events; nothing to advance.
     this.notify('plan');
   },
 
   _setAllCompleted() {
-    this.planSteps = this.planSteps.map(s => ({ ...s, status: 'done' }));
+    // Leave failed steps failed — a completed review may still contain
+    // work that did not succeed.
+    this.planSteps = this.planSteps.map(s =>
+      s.status === 'failed' ? s : { ...s, status: 'done' }
+    );
     Object.keys(this.agents).forEach(id => this._setAgentState(id, 'completed'));
   },
 };

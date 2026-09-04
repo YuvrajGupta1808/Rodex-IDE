@@ -172,6 +172,8 @@ btnRun.addEventListener('click', async () => {
   store.activity = [];
   store._openStepId = null;
   store.lastError = null;
+  store.running = true;
+  store.planSteps = [];
   _appliedFixes.clear();
   clearFindingsUI();
 
@@ -251,13 +253,25 @@ function renderAgents() {
 }
 
 // ── Render plan ──
+// The plan is no longer a fixed five-step script — the coordinator decides
+// what to do, so steps appear as it chooses them and close with their own
+// outcome. Until it has chosen anything, say so rather than showing nothing.
 function renderPlan() {
   const body = document.getElementById('plan-body');
-  if (!store.planSteps.length) return;
-  body.innerHTML = store.planSteps.map(s => `
-    <div class="plan-step ${s.status === 'done' ? 'done' : s.status === 'active' ? 'active' : ''}">
-      <div class="plan-step-num">${s.status === 'done' ? 'DONE' : s.step}</div>
-      <span>${s.description}</span>
+  if (!body) return;
+
+  if (!store.planSteps.length) {
+    body.innerHTML = store.running
+      ? `<div class="empty-state"><span>Coordinator is planning…</span></div>`
+      : `<div class="empty-state"><span>Run analysis to see plan</span></div>`;
+    return;
+  }
+
+  const badge = { done: 'DONE', failed: 'FAIL', active: '•' };
+  body.innerHTML = store.planSteps.map(step => `
+    <div class="plan-step ${escapeHtml(step.status)}">
+      <div class="plan-step-num">${badge[step.status] || step.step}</div>
+      <span>${escapeHtml(step.description)}</span>
     </div>
   `).join('');
 }

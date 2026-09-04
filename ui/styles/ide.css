@@ -1114,3 +1114,11 @@
   opacity: 0.75;
   padding-bottom: 4px;
 }
+
+/* A plan step that did not succeed — the plan now reflects real outcomes,
+   so a failed step must not be shown as done. */
+.plan-step.failed .plan-step-num {
+  color: var(--err, #f85149);
+  border-color: var(--err, #f85149);
+}
+.plan-step.failed span { color: var(--text-muted); }

@@ -9,7 +9,6 @@ from ..events.schemas import (
     Finding,
     FixProposal,
     FixVerification,
-    PlanStep,
     ReviewResult,
     Severity,
 )
@@ -148,15 +147,6 @@ class CoordinatorAgent(BaseAgent):
                 agent.mcp_manager = self._mcp_manager
 
         return specialists, fix_agent
-
-    def _build_plan(self, context: SharedContext) -> list[PlanStep]:
-        return [
-            PlanStep(step=1, description=f"Parse {len(context.files)} file(s)"),
-            PlanStep(step=2, description="Security analysis (parallel)"),
-            PlanStep(step=3, description="Bug detection (parallel)"),
-            PlanStep(step=4, description="Apply & verify fixes"),
-            PlanStep(step=5, description="Consolidate findings"),
-        ]
 
     def _deduplicate(self, findings: list[Finding]) -> list[Finding]:
         seen: dict[tuple, Finding] = {}
