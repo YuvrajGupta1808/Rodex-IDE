@@ -40,6 +40,9 @@ class CoordinatorAgent(BaseAgent):
         self.agent_drive = agent_drive
         self._session_id = session_id
         self.telemetry = ReviewTelemetry(session_id=session_id)
+        # Any agent recording usage pushes a snapshot, so the cost panel
+        # moves throughout the review rather than once per agent.
+        self.telemetry.on_update = self.emitter.telemetry
 
     async def analyze(self, context: SharedContext) -> AgentResult:
         raise NotImplementedError("Use run_review() instead")

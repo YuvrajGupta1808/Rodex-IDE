@@ -97,9 +97,16 @@ class CoordinatorLoop:
                 extra_body=thinking_extra_body(),
             )
 
-            text, tool_calls, usage = await stream_reasoning(stream, self._emitter)
+            async def _progress(chars):
+                await self._coordinator.telemetry.note_activity(
+                    "coordinator", model, chars
+                )
+
+            text, tool_calls, usage = await stream_reasoning(
+                stream, self._emitter, on_progress=_progress
+            )
             duration_ms = int((time.monotonic() - started) * 1000)
-            self._coordinator.telemetry.record_usage(
+            await self._coordinator.telemetry.record_usage_async(
                 "coordinator", model, usage, duration_ms
             )
             await self._emitter.tool_call_result(

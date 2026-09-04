@@ -352,7 +352,7 @@ function renderTextBlock(group, key) {
   }).join('');
   const cls = group.kind === 'reasoning' ? 'act-reasoning' : 'act-thought';
   const more = overflow > 0
-    ? `<button class="act-more" data-expand="${escapeHtml(key)}">${
+    ? `<button class="act-more" data-expanded="${expanded}" data-expand="${escapeHtml(key)}">${
         expanded
           ? 'Hide earlier lines'
           : `Show ${overflow} earlier line${overflow === 1 ? '' : 's'}`
@@ -584,9 +584,9 @@ function renderCost() {
 
   const { totals, agents = [] } = telemetry;
   const rows = agents.map(a => `
-    <div class="cost-row">
+    <div class="cost-row${a.in_flight ? ' in-flight' : ''}">
       <span class="cost-agent">${escapeHtml(agentLabel(a.agent_id))}</span>
-      <span class="cost-tokens">${formatTokens(a.total_tokens)}</span>
+      <span class="cost-tokens">${formatTokens(a.total_tokens)}${a.in_flight ? '~' : ''}</span>
       <span class="cost-usd">$${a.cost_usd.toFixed(4)}</span>
     </div>`).join('');
 

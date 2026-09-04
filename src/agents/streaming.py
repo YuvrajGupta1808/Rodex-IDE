@@ -13,6 +13,7 @@ concerns are handled here so every agent behaves the same way:
 
 from __future__ import annotations
 
+import inspect
 import re
 
 # Emit roughly a short sentence at a time: long enough to avoid flooding
@@ -144,7 +145,12 @@ class _ThoughtSplitter:
         return _readable_fragments(text)
 
 
-async def stream_thinking(stream, emitter, on_usage=None) -> str:
+# Report in-flight progress at most this often, so a fast stream does not
+# flood the event bus with cost updates.
+_PROGRESS_EVERY_CHARS = 400
+
+
+async def stream_thinking(stream, emitter, on_usage=None, on_progress=None) -> str:
     """Consume an OpenAI-style stream, emitting readable progress.
 
     Reasoning is streamed as it arrives so the panel fills during the
@@ -156,11 +162,14 @@ async def stream_thinking(stream, emitter, on_usage=None) -> str:
     full_response = ""
     narrator = _FindingNarrator()
     thoughts = _ThoughtSplitter()
+    next_progress = _PROGRESS_EVERY_CHARS
 
     async for chunk in stream:
         usage = getattr(chunk, "usage", None)
         if usage is not None and on_usage is not None:
-            on_usage(usage)
+            outcome = on_usage(usage)
+            if inspect.isawaitable(outcome):
+                await outcome
         if not chunk.choices:
             continue
         delta = chunk.choices[0].delta.content or ""
@@ -173,6 +182,12 @@ async def stream_thinking(stream, emitter, on_usage=None) -> str:
         for line in narrator.new_lines(full_response):
             for fragment in _readable_fragments(line):
                 await emitter.thinking(fragment)
+
+        if on_progress is not None and len(full_response) >= next_progress:
+            next_progress = len(full_response) + _PROGRESS_EVERY_CHARS
+            outcome = on_progress(len(full_response))
+            if inspect.isawaitable(outcome):
+                await outcome
 
     for line in narrator.new_lines(full_response):
         for fragment in _readable_fragments(line):
@@ -204,7 +219,7 @@ def summarize_response(raw: str, usage=None) -> str:
     return " · ".join(parts)
 
 
-async def stream_reasoning(stream, emitter):
+async def stream_reasoning(stream, emitter, on_progress=None):
     """Consume a tool-calling stream, emitting the model's reasoning live.
 
     Unlike ``stream_thinking`` the payload here is tool calls rather than
@@ -215,6 +230,7 @@ async def stream_reasoning(stream, emitter):
     text = ""
     usage = None
     thoughts = _ThoughtSplitter()
+    next_progress = _PROGRESS_EVERY_CHARS
     # Tool calls stream in fragments keyed by index; reassemble them.
     partial: dict[int, dict] = {}
 
@@ -231,6 +247,11 @@ async def stream_reasoning(stream, emitter):
             text += content
             for fragment in thoughts.feed(content):
                 await emitter.reasoning(fragment)
+            if on_progress is not None and len(text) >= next_progress:
+                next_progress = len(text) + _PROGRESS_EVERY_CHARS
+                outcome = on_progress(len(text))
+                if inspect.isawaitable(outcome):
+                    await outcome
 
         for call in getattr(delta, "tool_calls", None) or []:
             slot = partial.setdefault(

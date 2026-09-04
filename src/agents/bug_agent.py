@@ -112,16 +112,20 @@ class BugDetectionAgent(BaseAgent):
         started = time.monotonic()
         usage_holder: dict = {}
 
-        def _record(usage):
+        async def _record(usage):
             usage_holder["usage"] = usage
-            self.telemetry.record_usage(
+            await self.telemetry.record_usage_async(
                 self.agent_id, model, usage, int((time.monotonic() - started) * 1000)
             )
+
+        async def _progress(chars):
+            await self.telemetry.note_activity(self.agent_id, model, chars)
 
         full_response = await stream_thinking(
             stream,
             self.emitter,
             on_usage=_record,
+            on_progress=_progress,
         )
 
         duration_ms = int((time.monotonic() - started) * 1000)

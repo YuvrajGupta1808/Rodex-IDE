@@ -7,8 +7,12 @@ tokens and are kept in one table so a model change is a one-line edit.
 
 from __future__ import annotations
 
+import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
+
+logger = logging.getLogger(__name__)
 
 # USD per 1M tokens, (input, output).
 _PRICING: dict[str, tuple[float, float]] = {
@@ -40,6 +44,9 @@ class AgentUsage:
     total_tokens: int = 0
     latency_ms: int = 0
     cost_usd: float = 0.0
+    # Approximate tokens for a call still streaming; superseded by the
+    # provider's real count once the call finishes.
+    streaming_tokens: int = 0
 
     def record(
         self,
@@ -57,10 +64,14 @@ class AgentUsage:
         self.total_tokens += prompt_tokens + completion_tokens
         self.latency_ms += latency_ms
         self.cost_usd += estimate_cost(model, prompt_tokens, completion_tokens)
+        self.streaming_tokens = 0   # real numbers have arrived
 
     def to_dict(self) -> dict:
         data = asdict(self)
         data["cost_usd"] = round(self.cost_usd, 6)
+        # Show in-flight progress in the headline token count.
+        data["total_tokens"] = self.total_tokens + self.streaming_tokens
+        data["in_flight"] = self.streaming_tokens > 0
         return data
 
 
@@ -71,6 +82,27 @@ class ReviewTelemetry:
     session_id: str
     agents: dict[str, AgentUsage] = field(default_factory=dict)
     started_at: float = field(default_factory=time.monotonic)
+    # Called after every recorded usage so the UI can update as a review
+    # runs, rather than only when an agent finishes.
+    on_update: Callable[[dict], Awaitable[None]] | None = None
+
+    async def note_activity(self, agent_id: str, model: str, chars: int) -> None:
+        """Report an in-flight call's progress.
+
+        Providers only send usage when a stream ends, so a long call would
+        otherwise leave the cost panel frozen. Streamed characters give an
+        approximate live token count that is replaced by the real figure
+        when the call completes.
+        """
+        usage = self.usage_for(agent_id)
+        usage.model = model or usage.model
+        # ~4 characters per token is the usual rough ratio.
+        usage.streaming_tokens = max(usage.streaming_tokens, chars // 4)
+        if self.on_update is not None:
+            try:
+                await self.on_update(self.summary())
+            except Exception:  # noqa: BLE001
+                logger.debug("telemetry observer failed", exc_info=True)
 
     def usage_for(self, agent_id: str) -> AgentUsage:
         if agent_id not in self.agents:
@@ -80,6 +112,17 @@ class ReviewTelemetry:
     def record_response(self, agent_id: str, model: str, response, latency_ms: int) -> None:
         """Record usage from an OpenAI-style response (safe if absent)."""
         self.record_usage(agent_id, model, getattr(response, "usage", None), latency_ms)
+
+    async def record_usage_async(
+        self, agent_id: str, model: str, usage, latency_ms: int
+    ) -> None:
+        """Record usage and notify the observer, if one is attached."""
+        self.record_usage(agent_id, model, usage, latency_ms)
+        if usage is not None and self.on_update is not None:
+            try:
+                await self.on_update(self.summary())
+            except Exception:  # noqa: BLE001 - telemetry must not break a review
+                logger.debug("telemetry observer failed", exc_info=True)
 
     def record_usage(self, agent_id: str, model: str, usage, latency_ms: int) -> None:
         """Record a provider usage object (safe if absent)."""

@@ -1107,12 +1107,45 @@
 }
 
 /* Marker for reasoning lines collapsed out of a long block. */
+/* Control revealing the reasoning collapsed out of a long block. It is a
+   button, so it needs the browser's button styling stripped and its own
+   affordance — previously it inherited a plain label look and read as
+   highlighted text rather than something clickable. */
 .act-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 7px;
+  padding: 3px 9px;
+  font: inherit;
   font-size: 10px;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   color: var(--text-muted);
-  opacity: 0.75;
-  padding-bottom: 4px;
+  background: transparent;
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.1));
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.act-more::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.act-more:hover {
+  color: var(--text-primary, #e6e9ef);
+  border-color: rgba(255,255,255,0.22);
+  background: rgba(255,255,255,0.04);
+}
+
+.act-more:focus-visible {
+  outline: 1px solid var(--accent, #6ea8fe);
+  outline-offset: 1px;
 }
 
 /* A plan step that did not succeed — the plan now reflects real outcomes,
@@ -1290,3 +1323,11 @@
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* Expanded: the chevron points up, matching the "hide" action. */
+.act-more[data-expanded="true"]::before {
+  transform: rotate(-135deg) translate(-1px, -1px);
+}
+
+/* An agent mid-call: its token count is an estimate until usage arrives. */
+.cost-row.in-flight .cost-tokens { color: var(--accent, #6ea8fe); }
