@@ -1,0 +1,272 @@
+"""Tests for the coordinator's control loop.
+
+These cover the decisions the loop owns — dispatching, dismissing,
+retrying a failed fix, and refusing unsafe commands — without calling a
+real model.
+"""
+
+import pytest
+
+from src.agents.agentic_loop import CoordinatorLoop
+from src.agents.orchestration import MAX_FIX_ATTEMPTS
+from src.events.schemas import Finding, FixProposal, FixVerification, Severity
+
+
+class _Emitter:
+    def __init__(self):
+        self.events = []
+
+    async def _record(self, kind, **payload):
+        self.events.append((kind, payload))
+
+    async def reasoning(self, text):
+        await self._record("reasoning", text=text)
+
+    async def step_started(self, step_id, title, detail=""):
+        await self._record("step_started", step_id=step_id, title=title, detail=detail)
+
+    async def step_completed(self, step_id, outcome, summary=""):
+        await self._record(
+            "step_completed", step_id=step_id, outcome=outcome, summary=summary
+        )
+
+    async def decision(self, choice, rationale, options=None):
+        await self._record("decision", choice=choice, rationale=rationale)
+
+    async def retry_scheduled(self, target, attempt, max_attempts, reason):
+        await self._record("retry", target=target, attempt=attempt, reason=reason)
+
+    async def error(self, message):
+        await self._record("error", message=message)
+
+    async def tool_call_start(self, *args, **kwargs):
+        pass
+
+    async def tool_call_result(self, *args, **kwargs):
+        pass
+
+    def kinds(self):
+        return [kind for kind, _ in self.events]
+
+
+class _Context:
+    def __init__(self):
+        self.session_id = "s1"
+        self.files = {"m.py": "import sqlite3\nx = 1\n"}
+        self.metadata = {}
+        self.existing_findings = []
+
+
+class _Coordinator:
+    def __init__(self, emitter):
+        self.emitter = emitter
+        self.telemetry = type("T", (), {"record_usage": lambda *a, **k: None})()
+        self.sandbox_manager = None
+
+
+def _finding(finding_id="f1"):
+    return Finding(
+        finding_id=finding_id,
+        file="m.py",
+        line=1,
+        severity=Severity.CRITICAL,
+        category="sql_injection",
+        description="f-string in query",
+        agent_id="security",
+    )
+
+
+class _Specialist:
+    def __init__(self, findings):
+        self._findings = findings
+        self.seen_focus = None
+
+    async def analyze(self, context):
+        self.seen_focus = context.metadata.get("focus")
+        return type("R", (), {"findings": self._findings})()
+
+
+class _FixAgent:
+    """Fails the first ``fail_times`` attempts, then verifies."""
+
+    def __init__(self, fail_times=0):
+        self.fail_times = fail_times
+        self.calls = 0
+        self.guidance_seen = []
+
+    async def apply_fixes(self, findings, context, sandbox=None):
+        self.calls += 1
+        self.guidance_seen.append(context.metadata.get("fix_guidance"))
+        passed = self.calls > self.fail_times
+        finding = findings[0]
+        return type(
+            "R",
+            (),
+            {
+                "fix_proposals": [
+                    FixProposal(
+                        finding_id=finding.finding_id,
+                        original_code="x",
+                        proposed_fix="y",
+                        explanation="",
+                        confidence=0.9,
+                        file="m.py",
+                        line=1,
+                    )
+                ],
+                "fix_verifications": [
+                    FixVerification(
+                        finding_id=finding.finding_id,
+                        verification_passed=passed,
+                        test_output="" if passed else "__PATTERN_REMAINS__",
+                        duration_ms=1,
+                    )
+                ],
+            },
+        )()
+
+
+def _loop(specialist=None, fix_agent=None):
+    emitter = _Emitter()
+    return (
+        CoordinatorLoop(
+            coordinator=_Coordinator(emitter),
+            context=_Context(),
+            specialists={"security": specialist or _Specialist([])},
+            fix_agent=fix_agent or _FixAgent(),
+            sandbox=object(),
+        ),
+        emitter,
+    )
+
+
+@pytest.mark.asyncio
+async def test_inspect_code_returns_numbered_source():
+    loop, _ = _loop()
+
+    out = await loop._dispatch({"name": "inspect_code", "arguments": "{}"})
+
+    assert "=== m.py ===" in out
+    assert "  1  import sqlite3" in out
+
+
+@pytest.mark.asyncio
+async def test_dispatching_a_specialist_passes_the_focus_through():
+    specialist = _Specialist([_finding()])
+    loop, emitter = _loop(specialist=specialist)
+
+    out = await loop._dispatch(
+        {
+            "name": "run_specialist",
+            "arguments": '{"agent": "security", "focus": "the f-string on line 4"}',
+        }
+    )
+
+    assert specialist.seen_focus == "the f-string on line 4"
+    assert "1 finding(s)" in out
+    assert "step_started" in emitter.kinds()
+    assert "decision" in emitter.kinds()
+    assert loop.findings["f1"].category == "sql_injection"
+
+
+@pytest.mark.asyncio
+async def test_dismissing_a_finding_removes_it_from_the_result():
+    loop, emitter = _loop(specialist=_Specialist([_finding()]))
+    await loop._dispatch(
+        {"name": "run_specialist", "arguments": '{"agent":"security","focus":"x"}'}
+    )
+
+    await loop._dispatch(
+        {
+            "name": "dismiss_finding",
+            "arguments": '{"finding_id":"f1","reason":"guarded on the same line"}',
+        }
+    )
+
+    assert "f1" not in loop.findings
+    assert loop.dismissed["f1"] == "guarded on the same line"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_fix_reports_why_and_invites_a_retry():
+    fix_agent = _FixAgent(fail_times=1)
+    loop, emitter = _loop(specialist=_Specialist([_finding()]), fix_agent=fix_agent)
+    await loop._dispatch(
+        {"name": "run_specialist", "arguments": '{"agent":"security","focus":"x"}'}
+    )
+
+    out = await loop._dispatch({"name": "apply_fix", "arguments": '{"finding_id":"f1"}'})
+
+    assert "did NOT verify" in out
+    assert "__PATTERN_REMAINS__" in out
+    assert "retry" in out
+    assert ("step_completed", {"step_id": "step-2", "outcome": "failed",
+                               "summary": "__PATTERN_REMAINS__"}) in emitter.events
+
+
+@pytest.mark.asyncio
+async def test_a_retry_carries_guidance_and_is_announced():
+    fix_agent = _FixAgent(fail_times=1)
+    loop, emitter = _loop(specialist=_Specialist([_finding()]), fix_agent=fix_agent)
+    await loop._dispatch(
+        {"name": "run_specialist", "arguments": '{"agent":"security","focus":"x"}'}
+    )
+    await loop._dispatch({"name": "apply_fix", "arguments": '{"finding_id":"f1"}'})
+
+    out = await loop._dispatch(
+        {
+            "name": "apply_fix",
+            "arguments": '{"finding_id":"f1","guidance":"use a parameterised query"}',
+        }
+    )
+
+    assert "verified" in out
+    assert fix_agent.guidance_seen[-1] == "use a parameterised query"
+    assert "retry" in emitter.kinds()
+
+
+@pytest.mark.asyncio
+async def test_attempts_are_bounded():
+    fix_agent = _FixAgent(fail_times=99)
+    loop, _ = _loop(specialist=_Specialist([_finding()]), fix_agent=fix_agent)
+    await loop._dispatch(
+        {"name": "run_specialist", "arguments": '{"agent":"security","focus":"x"}'}
+    )
+
+    for _ in range(MAX_FIX_ATTEMPTS):
+        await loop._dispatch({"name": "apply_fix", "arguments": '{"finding_id":"f1"}'})
+    out = await loop._dispatch({"name": "apply_fix", "arguments": '{"finding_id":"f1"}'})
+
+    assert "already been attempted" in out
+    assert fix_agent.calls == MAX_FIX_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_an_unsafe_command_is_refused_without_touching_the_sandbox():
+    loop, emitter = _loop()
+
+    out = await loop._dispatch(
+        {"name": "run_command", "arguments": '{"command":"rm -rf /","purpose":"x"}'}
+    )
+
+    assert out.startswith("Refused")
+    # sandbox_manager is None, so reaching it at all would raise.
+    assert "decision" in emitter.kinds()
+
+
+@pytest.mark.asyncio
+async def test_unknown_tool_is_reported_rather_than_raising():
+    loop, _ = _loop()
+
+    out = await loop._dispatch({"name": "nonexistent", "arguments": "{}"})
+
+    assert "Unknown tool" in out
+
+
+@pytest.mark.asyncio
+async def test_malformed_arguments_do_not_crash_the_loop():
+    loop, _ = _loop()
+
+    out = await loop._dispatch({"name": "inspect_code", "arguments": "{not json"})
+
+    assert "=== m.py ===" in out
