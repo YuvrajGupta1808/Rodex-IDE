@@ -62,14 +62,34 @@ class SandboxManager:
         except Exception:
             return _MockSandbox(name)
 
-    async def write_file(self, sandbox: Any, path: str, content: str) -> None:
+    async def write_file(
+        self, sandbox: Any, path: str, content: str, emitter: Any = None
+    ) -> None:
+        """Write a file into the sandbox, logging the call when an emitter is given.
+
+        A failed write is reported rather than swallowed silently — it
+        previously looked identical to a success in the log.
+        """
+        start = time.monotonic()
+        if emitter is not None:
+            await emitter.tool_call_start(
+                "sandbox.write_file", {"path": path, "bytes": len(content)}
+            )
         try:
             if hasattr(sandbox, "fs"):
                 await sandbox.fs.write(path, content)
             else:
                 await sandbox.filesystem.writeFile(path, content)
-        except Exception:
-            pass
+            error = None
+        except Exception as exc:  # noqa: BLE001 - reported, not raised
+            error = str(exc)
+        if emitter is not None:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            await emitter.tool_call_result(
+                "sandbox.write_file",
+                f"wrote {len(content)} bytes to {path}" if error is None else f"failed: {error}",
+                duration_ms,
+            )
 
     async def read_file(self, sandbox: Any, path: str) -> str:
         try:

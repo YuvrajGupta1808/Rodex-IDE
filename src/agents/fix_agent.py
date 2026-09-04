@@ -59,7 +59,9 @@ class FixAgent(BaseAgent):
 
         # Write all source files into sandbox
         for filename, content in context.files.items():
-            await self.sandbox_manager.write_file(sandbox, f"/tmp/{filename}", content)
+            await self.sandbox_manager.write_file(
+                sandbox, f"/tmp/{filename}", content, emitter=self.emitter
+            )
 
         for finding in findings:
             await self.emitter.thinking(
@@ -80,7 +82,9 @@ class FixAgent(BaseAgent):
             # Sync updated file back to sandbox after successful fix
             if verification.verification_passed:
                 updated = context.files.get(finding.file, "")
-                await self.sandbox_manager.write_file(sandbox, f"/tmp/{finding.file}", updated)
+                await self.sandbox_manager.write_file(
+                    sandbox, f"/tmp/{finding.file}", updated, emitter=self.emitter
+                )
 
         await self.emitter.agent_completed(len(proposals))
         return AgentResult(
@@ -246,7 +250,16 @@ class FixAgent(BaseAgent):
 
         # Apply the fix: try exact replace first, fall back to line-based replace
         source = context.files.get(finding.file, "")
+        await self.emitter.tool_call_start(
+            "fix.apply_patch",
+            {"file": finding.file, "line": finding.line, "category": finding.category},
+        )
         patched = self._apply_fix(source, proposal)
+        await self.emitter.tool_call_result(
+            "fix.apply_patch",
+            "patch applied" if patched != source else "original_code not found in source",
+            int((time.monotonic() - t0) * 1000),
+        )
 
         if patched == source:
             # Fix couldn't be applied — syntax check the original as fallback
@@ -266,7 +279,9 @@ class FixAgent(BaseAgent):
 
         # Write patched file to sandbox for syntax check
         tmp_path = f"/tmp/{finding.file}"
-        await self.sandbox_manager.write_file(sandbox, tmp_path, patched)
+        await self.sandbox_manager.write_file(
+            sandbox, tmp_path, patched, emitter=self.emitter
+        )
 
         # Syntax check via py_compile
         result = await self.sandbox_manager.exec_with_streaming(
@@ -297,7 +312,13 @@ class FixAgent(BaseAgent):
         if not passed:
             # Rollback
             context.files[finding.file] = source
+            await self.emitter.tool_call_start(
+                "drive.restore_snapshot", {"file": finding.file}
+            )
             await self.agent_drive.restore_snapshot(context.session_id, finding.file)
+            await self.emitter.tool_call_result(
+                "drive.restore_snapshot", f"rolled back {finding.file}", 0
+            )
 
         return FixVerification(
             finding_id=finding.finding_id,
