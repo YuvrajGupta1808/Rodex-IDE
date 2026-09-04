@@ -174,6 +174,9 @@ btnRun.addEventListener('click', async () => {
   store.lastError = null;
   store.running = true;
   store.planSteps = [];
+  store.telemetry = null;
+  store.summary = '';
+  store.dismissed = [];
   _appliedFixes.clear();
   clearFindingsUI();
 
@@ -506,6 +509,72 @@ function renderToolLog() {
 }
 
 // ── Render findings (Problems tab) ──
+// ── Review verdict, dismissals and cost ───────────────────────────────
+// The backend already writes a closing summary, records which findings the
+// coordinator rejected and why, and measures the run. None of it reached
+// the UI, so the coordinator's judgement and the cost of a review were
+// invisible.
+
+function formatTokens(n) {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+function formatDuration(ms) {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
+}
+
+function renderVerdict() {
+  if (!store.summary) return '';
+  return `<div class="review-verdict">
+      <div class="review-verdict-label">Verdict</div>
+      <div class="review-verdict-text">${escapeHtml(store.summary)}</div>
+    </div>`;
+}
+
+function renderDismissed() {
+  const dismissed = store.dismissed || [];
+  if (!dismissed.length) return '';
+  const rows = dismissed.map(d => `
+    <div class="dismissed-row">
+      <span class="dismissed-reason">${escapeHtml(d.reason || 'No reason given')}</span>
+    </div>`).join('');
+  const label = `${dismissed.length} finding${dismissed.length === 1 ? '' : 's'} dismissed as false positive${dismissed.length === 1 ? '' : 's'}`;
+  return `<details class="dismissed-block">
+      <summary>${label}</summary>
+      ${rows}
+    </details>`;
+}
+
+function renderTelemetry() {
+  const telemetry = store.telemetry;
+  if (!telemetry || !telemetry.totals) return '';
+  const { totals, agents = [] } = telemetry;
+  const perAgent = agents.map(a => `
+    <div class="tm-agent">
+      <span class="tm-agent-name">${escapeHtml(agentLabel(a.agent_id))}</span>
+      <span>${formatTokens(a.total_tokens)} tok</span>
+      <span>${formatTokens(a.reasoning_tokens)} reasoning</span>
+      <span>${formatDuration(a.latency_ms)}</span>
+      <span>$${a.cost_usd.toFixed(4)}</span>
+    </div>`).join('');
+  return `<details class="telemetry-block">
+      <summary>
+        <span>${agents.length} agents</span>
+        <span>${formatTokens(totals.total_tokens)} tokens</span>
+        <span>${formatTokens(totals.reasoning_tokens)} reasoning</span>
+        <span>$${totals.cost_usd.toFixed(4)}</span>
+        <span>${formatDuration(totals.wall_clock_ms)}</span>
+      </summary>
+      <div class="tm-agents">${perAgent}</div>
+    </details>`;
+}
+
+function renderReviewMeta() {
+  return renderVerdict() + renderDismissed() + renderTelemetry();
+}
+
 function renderFindings() {
   const list = document.getElementById('findings-list');
   const count = document.getElementById('findings-count');
@@ -519,10 +588,10 @@ function renderFindings() {
   count.textContent = store.findings.length;
 
   if (!store.findings.length) {
-    list.innerHTML = `
-      <div class="empty-state">
-        <span>Run analysis to see problems</span>
-      </div>`;
+    const meta = renderReviewMeta();
+    list.innerHTML = meta
+      ? meta + `<div class="empty-state"><span>No problems found</span></div>`
+      : `<div class="empty-state"><span>Run analysis to see problems</span></div>`;
     return;
   }
 
@@ -532,7 +601,7 @@ function renderFindings() {
   }
 
   if (!visibleFindings.length) {
-    list.innerHTML = `
+    list.innerHTML = renderReviewMeta() + `
       <div class="empty-state">
         <span>No ${_findingSeverityFilter} problems found</span>
       </div>`;
@@ -543,7 +612,7 @@ function renderFindings() {
     _selectedFindingId = visibleFindings[0].finding_id;
   }
 
-  list.innerHTML = visibleFindings.map(f => {
+  list.innerHTML = renderReviewMeta() + visibleFindings.map(f => {
     const fix = store.fixProposals[f.finding_id];
     const ver = store.fixVerifications[f.finding_id];
     let fixStatus = 'none';

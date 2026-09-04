@@ -22,6 +22,9 @@ export const store = {
   _openStepId: null,
   lastError: null,
   running: false,
+  telemetry: null,
+  summary: '',
+  dismissed: [],
   toolCalls: [],     // [{agentId, toolName, inputs, output, durationMs, ok}]
   findings: [],      // Finding objects
   fixProposals: {},  // findingId -> FixProposal
@@ -185,6 +188,12 @@ export const store = {
 
       case 'review_completed':
         this.fixedFiles = data?.fixed_files || {};
+        // The backend already measures the review and records what the
+        // coordinator concluded and rejected; surface it instead of
+        // discarding it.
+        this.telemetry = data?.telemetry || null;
+        this.summary = data?.summary || '';
+        this.dismissed = data?.dismissed || [];
         this.running = false;
         this._setAllCompleted();
         this.notify('plan');

@@ -1122,3 +1122,89 @@
   border-color: var(--err, #f85149);
 }
 .plan-step.failed span { color: var(--text-muted); }
+
+/* ── Review verdict, dismissals and cost ───────────────────────────────
+   The coordinator's closing judgement, the findings it rejected, and what
+   the review actually cost. All three were computed and discarded. */
+
+.review-verdict {
+  display: grid;
+  grid-template-columns: 68px 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 11px 13px;
+  margin-bottom: 8px;
+  border-left: 2px solid var(--accent, #6ea8fe);
+  background: rgba(110,168,254,0.06);
+  border-radius: 0 5px 5px 0;
+}
+
+.review-verdict-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent, #6ea8fe);
+  font-weight: 600;
+}
+
+.review-verdict-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-primary, #e6e9ef);
+  overflow-wrap: anywhere;
+}
+
+/* Findings the coordinator rejected, with its reasoning. */
+.dismissed-block,
+.telemetry-block {
+  margin-bottom: 8px;
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.07));
+  border-radius: 5px;
+  background: rgba(255,255,255,0.014);
+  overflow: hidden;
+}
+
+.dismissed-block > summary,
+.telemetry-block > summary {
+  padding: 9px 13px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-muted);
+  list-style: none;
+  user-select: none;
+}
+.dismissed-block > summary::-webkit-details-marker,
+.telemetry-block > summary::-webkit-details-marker { display: none; }
+.dismissed-block > summary:hover,
+.telemetry-block > summary:hover { background: rgba(255,255,255,0.03); }
+
+.dismissed-row {
+  padding: 7px 13px 7px 26px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary, #b9bec7);
+  border-top: 1px solid var(--border-subtle, rgba(255,255,255,0.05));
+  overflow-wrap: anywhere;
+}
+
+/* Cost and token accounting, per agent. */
+.telemetry-block > summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-agents { border-top: 1px solid var(--border-subtle, rgba(255,255,255,0.05)); }
+
+.tm-agent {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto auto;
+  gap: 14px;
+  padding: 6px 13px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.tm-agent + .tm-agent { border-top: 1px solid var(--border-subtle, rgba(255,255,255,0.03)); }
+.tm-agent-name { color: var(--text-secondary, #b9bec7); }
