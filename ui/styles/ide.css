@@ -1208,3 +1208,85 @@
 }
 .tm-agent + .tm-agent { border-top: 1px solid var(--border-subtle, rgba(255,255,255,0.03)); }
 .tm-agent-name { color: var(--text-secondary, #b9bec7); }
+
+/* ── Cost analysis (sidebar) ───────────────────────────────────────────
+   Accrues live during the review rather than appearing only at the end. */
+
+.cost-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px 8px;
+  border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.06));
+}
+
+.cost-total-usd {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary, #e6e9ef);
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-total-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  padding: 5px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-agent { color: var(--text-secondary, #b9bec7); }
+.cost-usd { min-width: 52px; text-align: right; }
+.cost-tokens { min-width: 42px; text-align: right; }
+
+.cost-footnote {
+  padding: 7px 12px 9px;
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.8;
+  border-top: 1px solid var(--border-subtle, rgba(255,255,255,0.05));
+  font-variant-numeric: tabular-nums;
+}
+
+/* Step number, shared with the execution plan so the panels line up. */
+.act-step-num {
+  flex: none;
+  min-width: 17px;
+  height: 17px;
+  line-height: 17px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.07);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.act-step-ok .act-step-num { background: var(--green-dim, rgba(63,185,80,0.15)); color: var(--green, #3fb950); }
+.act-step-failed .act-step-num { background: rgba(248,81,73,0.15); color: var(--err, #f85149); }
+
+/* Step number in the tool log, matching the execution plan. */
+.tool-log-step {
+  display: inline-block;
+  min-width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  margin-right: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.07);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

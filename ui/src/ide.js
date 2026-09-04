@@ -170,11 +170,13 @@ btnRun.addEventListener('click', async () => {
   store.fixVerifications = {};
   store.fixedFiles = {};
   store.activity = [];
+  _expandedBlocks.clear();
   store._openStepId = null;
   store.lastError = null;
   store.running = true;
   store.planSteps = [];
   store.telemetry = null;
+  renderCost();
   store.summary = '';
   store.dismissed = [];
   _appliedFixes.clear();
@@ -223,6 +225,7 @@ store.subscribe((key) => {
     renderAgents();
   }
   if (key === 'plan') renderPlan();
+  if (key === 'cost') renderCost();
   if (key === 'thoughts') renderThoughts();
   if (key === 'tools') renderToolLog();
   if (key === 'findings' || key === 'fixes') {
@@ -297,6 +300,14 @@ function agentLabel(id) {
   return AGENT_LABELS[id] || id;
 }
 
+// The execution plan numbers each step. Showing that number wherever the
+// step's work appears lets the plan, the activity feed and the tool log be
+// read against one another.
+function stepNumberFor(stepId) {
+  const match = (store.planSteps || []).find(s => s.stepId === stepId);
+  return match ? match.step : null;
+}
+
 // Consecutive reasoning/thought lines from one agent become a single block.
 function groupEntries(entries) {
   const groups = [];
@@ -319,9 +330,18 @@ function groupEntries(entries) {
 // blank space below the content. Older lines collapse behind a summary.
 const BLOCK_VISIBLE_LINES = 12;
 
-function renderTextBlock(group) {
+// Blocks the user has expanded, kept across re-renders so a stream of new
+// events does not collapse what they are reading.
+const _expandedBlocks = new Set();
+
+function renderTextBlock(group, key) {
+  // Collapsed lines are hidden, not discarded — a <details> lets the user
+  // read everything an agent said without unbounding the panel by default.
+  const expanded = _expandedBlocks.has(key);
   const overflow = group.lines.length - BLOCK_VISIBLE_LINES;
-  const shown = overflow > 0 ? group.lines.slice(-BLOCK_VISIBLE_LINES) : group.lines;
+  const shown = overflow > 0 && !expanded
+    ? group.lines.slice(-BLOCK_VISIBLE_LINES)
+    : group.lines;
   // The model marks its own step headers with "›"; promote them so a long
   // block can be skimmed.
   const body = shown.map(line => {
@@ -332,7 +352,11 @@ function renderTextBlock(group) {
   }).join('');
   const cls = group.kind === 'reasoning' ? 'act-reasoning' : 'act-thought';
   const more = overflow > 0
-    ? `<div class="act-more">${overflow} earlier line${overflow === 1 ? '' : 's'}</div>`
+    ? `<button class="act-more" data-expand="${escapeHtml(key)}">${
+        expanded
+          ? 'Hide earlier lines'
+          : `Show ${overflow} earlier line${overflow === 1 ? '' : 's'}`
+      }</button>`
     : '';
   return `<div class="act-block ${cls}">
       <div class="act-agent">${escapeHtml(agentLabel(group.agentId))}</div>
@@ -344,15 +368,19 @@ function renderStep(step) {
   const outcome = step.outcome || 'running';
   const badge = outcome === 'ok' ? '✓' : outcome === 'failed' ? '✕' : '•';
   const children = step.children?.length
-    ? `<div class="act-children">${renderEntries(step.children)}</div>`
+    ? `<div class="act-children">${renderEntries(step.children, `${step.stepId}-`)}</div>`
     : '';
   const summary = step.summary
     ? `<span class="act-step-summary">${escapeHtml(step.summary)}</span>` : '';
   const detail = step.detail
     ? `<div class="act-step-detail">${escapeHtml(step.detail)}</div>` : '';
+  const number = stepNumberFor(step.stepId);
+  const numberTag = number
+    ? `<span class="act-step-num">${number}</span>` : '';
   return `<details class="act-step act-step-${outcome}" open>
       <summary>
         <span class="act-step-badge">${badge}</span>
+        ${numberTag}
         <span class="act-step-title">${escapeHtml(step.title)}</span>
         ${summary}
       </summary>
@@ -360,8 +388,9 @@ function renderStep(step) {
     </details>`;
 }
 
-function renderEntries(entries) {
-  return groupEntries(entries).map(entry => {
+function renderEntries(entries, prefix = '') {
+  return groupEntries(entries).map((entry, index) => {
+    const key = `${prefix}${index}`;
     if (entry.kind === 'step') return renderStep(entry);
     if (entry.kind === 'decision') {
       return `<div class="act-decision">
@@ -381,7 +410,7 @@ function renderEntries(entries) {
           <span>${escapeHtml(entry.target)} — ${escapeHtml(entry.reason || '')}</span>
         </div>`;
     }
-    return renderTextBlock(entry);
+    return renderTextBlock(entry, key);
   }).join('');
 }
 
@@ -402,6 +431,17 @@ function renderThoughts() {
   // Render a bounded window — the store keeps the full history, but a
   // DOM this large is both slow and unscrollable.
   stream.innerHTML = renderEntries(entries.slice(-40));
+
+  stream.querySelectorAll('.act-more').forEach(btn => {
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const key = btn.dataset.expand;
+      if (_expandedBlocks.has(key)) _expandedBlocks.delete(key);
+      else _expandedBlocks.add(key);
+      renderThoughts();
+    });
+  });
+
   if (pinned) stream.scrollTop = stream.scrollHeight;
 }
 
@@ -497,6 +537,7 @@ function renderToolLog() {
   log.innerHTML = store.toolCalls.slice(0, 20).map(t => `
     <div class="tool-log-item">
       <div class="tool-log-header">
+        ${stepNumberFor(t.stepId) ? `<span class="tool-log-step">${stepNumberFor(t.stepId)}</span>` : ''}
         <span style="color:var(--text-muted);font-size:10px">${t.ts}</span>
         <span class="tool-log-name">${t.toolName}</span>
         <span style="color:var(--text-secondary);font-size:10px">[${t.agentId}]</span>
@@ -523,6 +564,39 @@ function formatDuration(ms) {
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
+}
+
+// Cost analysis lives in its own sidebar section under the execution plan,
+// updating as the review runs rather than only at the end.
+function renderCost() {
+  const body = document.getElementById('cost-body');
+  if (!body) return;
+
+  const telemetry = store.telemetry;
+  if (!telemetry || !telemetry.totals) {
+    body.innerHTML = `<div class="empty-state" style="height:50px;font-size:11px;">
+        <span style="color:var(--text-muted)">${
+          store.running ? 'Measuring…' : 'Run analysis to see cost'
+        }</span>
+      </div>`;
+    return;
+  }
+
+  const { totals, agents = [] } = telemetry;
+  const rows = agents.map(a => `
+    <div class="cost-row">
+      <span class="cost-agent">${escapeHtml(agentLabel(a.agent_id))}</span>
+      <span class="cost-tokens">${formatTokens(a.total_tokens)}</span>
+      <span class="cost-usd">$${a.cost_usd.toFixed(4)}</span>
+    </div>`).join('');
+
+  body.innerHTML = `
+    <div class="cost-total">
+      <span class="cost-total-usd">$${totals.cost_usd.toFixed(4)}</span>
+      <span class="cost-total-meta">${formatTokens(totals.total_tokens)} tokens · ${formatDuration(totals.wall_clock_ms)}</span>
+    </div>
+    <div class="cost-rows">${rows}</div>
+    <div class="cost-footnote">${formatTokens(totals.reasoning_tokens)} reasoning tokens · ${totals.calls} calls</div>`;
 }
 
 function renderVerdict() {

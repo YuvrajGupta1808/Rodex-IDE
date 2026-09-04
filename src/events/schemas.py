@@ -27,6 +27,7 @@ class EventType(StrEnum):
     STEP_COMPLETED = "step_completed"
     DECISION_MADE = "decision_made"
     RETRY_SCHEDULED = "retry_scheduled"
+    TELEMETRY_UPDATED = "telemetry_updated"
 
 
 class Severity(StrEnum):

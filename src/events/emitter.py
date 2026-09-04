@@ -11,6 +11,9 @@ class EventEmitter:
         self.agent_id = agent_id
         self.session_id = session_id
         self._bus = bus
+        # Set by the coordinator while a step is open, so tool calls can be
+        # attributed to the step whose work produced them.
+        self.step_id: str | None = None
 
     async def emit(self, event_type: EventType, data: dict[str, Any]) -> None:
         event = AgentEvent.make(event_type, self.agent_id, self.session_id, data)
@@ -26,7 +29,12 @@ class EventEmitter:
         await self.emit(EventType.AGENT_COMPLETED, {"finding_count": finding_count, "state": "completed"})
 
     async def tool_call_start(self, tool_name: str, inputs: dict[str, Any]) -> None:
-        await self.emit(EventType.TOOL_CALL_START, {"tool_name": tool_name, "inputs": inputs, "state": "tool_calling"})
+        await self.emit(EventType.TOOL_CALL_START, {
+            "tool_name": tool_name,
+            "inputs": inputs,
+            "state": "tool_calling",
+            "step_id": self.step_id,
+        })
 
     async def tool_call_result(self, tool_name: str, output: Any, duration_ms: int) -> None:
         await self.emit(EventType.TOOL_CALL_RESULT, {
@@ -34,6 +42,7 @@ class EventEmitter:
             "output": output if isinstance(output, str) else str(output)[:500],
             "duration_ms": duration_ms,
             "state": "thinking",
+            "step_id": self.step_id,
         })
 
     async def finding(self, finding_data: dict[str, Any]) -> None:
@@ -83,6 +92,10 @@ class EventEmitter:
                 "reason": reason,
             },
         )
+
+    async def telemetry(self, summary: dict[str, Any]) -> None:
+        """A running cost/usage snapshot, so the UI can show it live."""
+        await self.emit(EventType.TELEMETRY_UPDATED, summary)
 
     async def error(self, message: str) -> None:
         await self.emit(EventType.ERROR, {"message": message, "state": "error"})

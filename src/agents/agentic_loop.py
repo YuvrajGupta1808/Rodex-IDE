@@ -109,6 +109,7 @@ class CoordinatorLoop:
                 else "no action chosen",
                 duration_ms,
             )
+            await self._publish_telemetry()
 
             if not tool_calls:
                 # The model answered in prose instead of acting. Treat a
@@ -158,6 +159,13 @@ class CoordinatorLoop:
             "concluding with what has been established."
         )
 
+    async def _publish_telemetry(self) -> None:
+        """Push a running cost snapshot so the UI updates during the review."""
+        try:
+            await self._emitter.telemetry(self._coordinator.telemetry.summary())
+        except Exception:  # noqa: BLE001 - telemetry must never break a review
+            logger.debug("telemetry publish failed", exc_info=True)
+
     # ── tool dispatch ───────────────────────────────────────────────────
 
     async def _dispatch_batch(self, calls: list[dict[str, Any]]) -> list[str]:
@@ -168,12 +176,18 @@ class CoordinatorLoop:
         dispatches security and bug detection should not pay for them twice
         in wall-clock time.
 
-        Everything else is serialised. Fixes mutate the shared file
-        contents, and inspection should observe the state left by fixes in
-        the same turn, so those run in the order the model asked for them.
+        Fixes are grouped by file: two fixes to different files touch
+        disjoint state and run together, while fixes to the same file stay
+        in order because each must see what the previous one did.
+
+        Everything else is serialised.
         """
         concurrent = [c for c in calls if c["name"] in _CONCURRENT_TOOLS]
-        serial = [c for c in calls if c["name"] not in _CONCURRENT_TOOLS]
+        fixes = [c for c in calls if c["name"] == "apply_fix"]
+        serial = [
+            c for c in calls
+            if c["name"] not in _CONCURRENT_TOOLS and c["name"] != "apply_fix"
+        ]
 
         results: dict[int, str] = {}
         if len(concurrent) > 1:
@@ -194,10 +208,46 @@ class CoordinatorLoop:
                     else outcome
                 )
 
+        if fixes:
+            results.update(await self._dispatch_fixes(fixes))
+
         for call in serial:
             results[id(call)] = await self._dispatch(call)
 
         return [results[id(call)] for call in calls]
+
+    async def _dispatch_fixes(self, calls: list[dict[str, Any]]) -> dict[int, str]:
+        """Apply fixes, parallel across files and sequential within one."""
+        by_file: dict[str, list[dict[str, Any]]] = {}
+        for call in calls:
+            finding_id = _parse_args(call["arguments"]).get("finding_id", "")
+            finding = self.findings.get(finding_id)
+            by_file.setdefault(finding.file if finding else "", []).append(call)
+
+        if len(by_file) > 1:
+            await self._emitter.decision(
+                choice=f"fix {len(by_file)} files in parallel",
+                rationale="fixes to different files touch disjoint state",
+            )
+
+        async def run_group(group: list[dict[str, Any]]) -> dict[int, str]:
+            out: dict[int, str] = {}
+            for call in group:
+                out[id(call)] = await self._dispatch(call)
+            return out
+
+        grouped = await asyncio.gather(
+            *(run_group(group) for group in by_file.values()),
+            return_exceptions=True,
+        )
+        results: dict[int, str] = {}
+        for group, outcome in zip(by_file.values(), grouped, strict=True):
+            if isinstance(outcome, BaseException):
+                for call in group:
+                    results[id(call)] = f"Fix failed: {outcome}"
+            else:
+                results.update(outcome)
+        return results
 
     async def _dispatch(self, call: dict[str, Any]) -> str:
         name = call["name"]
@@ -239,6 +289,7 @@ class CoordinatorLoop:
         await self._emitter.step_started(
             step_id, f"{agent_id.replace('_', ' ').title()} analysis", focus
         )
+        _tag_step(specialist, step_id)
         await self._emitter.decision(
             choice=f"run {agent_id}",
             rationale=focus,
@@ -251,9 +302,11 @@ class CoordinatorLoop:
         for finding in new:
             self.findings[finding.finding_id] = finding
 
+        _tag_step(specialist, None)
         await self._emitter.step_completed(
             step_id, "ok", f"{len(new)} finding(s)"
         )
+        await self._publish_telemetry()
         if not new:
             return f"{agent_id} found nothing."
         return f"{agent_id} returned {len(new)} finding(s):\n" + _describe(new)
@@ -300,12 +353,14 @@ class CoordinatorLoop:
                 reason=guidance or "previous attempt did not verify",
             )
 
+        _tag_step(self._fix_agent, step_id)
         if guidance:
             self._context.metadata["fix_guidance"] = guidance
         result = await self._fix_agent.apply_fixes(
             [finding], self._context, sandbox=self._sandbox
         )
         self._context.metadata.pop("fix_guidance", None)
+        _tag_step(self._fix_agent, None)
 
         self.fix_proposals.extend(result.fix_proposals)
         self.fix_verifications.extend(result.fix_verifications)
@@ -365,6 +420,13 @@ class CoordinatorLoop:
             "Begin by stating what the code does and where you expect "
             "problems, then dispatch specialists accordingly.\n\n" + listing
         )
+
+
+def _tag_step(agent: Any, step_id: str | None) -> None:
+    """Attribute an agent's tool calls to the step it is working on."""
+    emitter = getattr(agent, "emitter", None)
+    if emitter is not None:
+        emitter.step_id = step_id
 
 
 def _parse_args(raw: str) -> dict[str, Any]:

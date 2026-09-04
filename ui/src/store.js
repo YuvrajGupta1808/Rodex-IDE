@@ -136,6 +136,7 @@ export const store = {
         this._setAgentState(agent_id, 'tool_calling');
         this.toolCalls = [{
           agentId: agent_id,
+          stepId: data.step_id || null,
           toolName: data.tool_name,
           inputs: data.inputs,
           output: null,
@@ -191,13 +192,20 @@ export const store = {
         // The backend already measures the review and records what the
         // coordinator concluded and rejected; surface it instead of
         // discarding it.
-        this.telemetry = data?.telemetry || null;
+        this.telemetry = data?.telemetry || this.telemetry;
         this.summary = data?.summary || '';
         this.dismissed = data?.dismissed || [];
         this.running = false;
         this._setAllCompleted();
         this.notify('plan');
+        this.notify('cost');
         this.notify('completed');
+        break;
+
+      case 'telemetry_updated':
+        // Cost accrues during the review, not only at the end.
+        this.telemetry = data || null;
+        this.notify('cost');
         break;
 
       case 'error':

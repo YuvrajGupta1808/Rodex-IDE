@@ -41,12 +41,17 @@ scrutinised in THIS code. A focus like "check the SQL string built from \
    Request every specialist you want in the SAME turn — they run in \
 parallel, so dispatching them together costs no more time than one. \
 Dispatching them one after another wastes minutes for no benefit.
-3. When findings return, judge them. Use `dismiss_finding` on anything \
-that is not a real defect — a false positive wastes the user's time, and \
-you are the last line of defence against one.
-4. Fix what is worth fixing with `apply_fix`. If a fix fails to verify, \
-you are told why. Decide whether to retry with better guidance or to \
-give up on that finding and say so.
+3. Judge findings as soon as they arrive — do not wait for every \
+specialist to report first. Use `dismiss_finding` on anything that is not \
+a real defect; a false positive wastes the user's time, and you are the \
+last line of defence against one.
+4. Fix what is worth fixing with `apply_fix`, and request all the fixes \
+you have decided on in the SAME turn. Fixes to different files run in \
+parallel; issuing them one turn at a time adds a slow model round-trip \
+before each one. If one specialist has reported and another is still \
+working, start fixing what you already have.
+   If a fix fails to verify you are told why. Decide whether to retry with \
+better guidance or to give up on that finding and say so.
 5. Call `finish_review` when the work is genuinely done.
 
 Be decisive and concise. Prefer a small number of well-aimed actions \

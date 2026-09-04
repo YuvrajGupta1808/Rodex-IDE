@@ -80,6 +80,7 @@ class _Specialist:
     def __init__(self, findings):
         self._findings = findings
         self.seen_focus = None
+        self.emitter = _Emitter()
 
     async def analyze(self, context):
         self.seen_focus = context.metadata.get("focus")
@@ -93,6 +94,7 @@ class _FixAgent:
         self.fail_times = fail_times
         self.calls = 0
         self.guidance_seen = []
+        self.emitter = _Emitter()
 
     async def apply_fixes(self, findings, context, sandbox=None):
         self.calls += 1
@@ -279,6 +281,7 @@ class _SlowSpecialist:
         self._findings = findings
         self._delay = delay
         self.log = log if log is not None else []
+        self.emitter = _Emitter()
 
     async def analyze(self, context):
         import asyncio as _asyncio
@@ -349,6 +352,8 @@ async def test_results_stay_aligned_with_their_tool_calls():
 @pytest.mark.asyncio
 async def test_one_failing_specialist_does_not_sink_the_batch():
     class _Boom:
+        emitter = _Emitter()
+
         async def analyze(self, context):
             raise RuntimeError("specialist crashed")
 
@@ -401,3 +406,60 @@ async def test_fixes_are_not_run_concurrently():
 
     # Each fix completes before the next begins.
     assert order == [("start", "a"), ("end", "a"), ("start", "b"), ("end", "b")]
+
+
+@pytest.mark.asyncio
+async def test_fixes_to_different_files_run_in_parallel():
+    """Fixes to disjoint files need not wait for one another.
+
+    Same-file fixes must stay ordered (each must see the previous patch),
+    but serialising every fix made a multi-file review pay for them one at
+    a time.
+    """
+    import asyncio as _asyncio
+
+    log = []
+
+    class _TrackingFix:
+        emitter = _Emitter()
+
+        async def apply_fixes(self, findings, context, sandbox=None):
+            finding = findings[0]
+            log.append(("start", finding.file))
+            await _asyncio.sleep(0.05)
+            log.append(("end", finding.file))
+            return type("R", (), {
+                "fix_proposals": [],
+                "fix_verifications": [
+                    FixVerification(
+                        finding_id=finding.finding_id,
+                        verification_passed=True,
+                        test_output="",
+                        duration_ms=1,
+                    )
+                ],
+            })()
+
+    emitter = _Emitter()
+    loop = CoordinatorLoop(
+        coordinator=_Coordinator(emitter),
+        context=_Context(),
+        specialists={},
+        fix_agent=_TrackingFix(),
+        sandbox=object(),
+    )
+    for finding_id, filename in (("a", "one.py"), ("b", "two.py")):
+        finding = _finding(finding_id)
+        finding.file = filename
+        loop.findings[finding_id] = finding
+
+    started = _asyncio.get_running_loop().time()
+    await loop._dispatch_batch([
+        {"id": "1", "name": "apply_fix", "arguments": '{"finding_id":"a"}'},
+        {"id": "2", "name": "apply_fix", "arguments": '{"finding_id":"b"}'},
+    ])
+    elapsed = _asyncio.get_running_loop().time() - started
+
+    # Both files start before either finishes.
+    assert [kind for kind, _ in log[:2]] == ["start", "start"]
+    assert elapsed < 0.09

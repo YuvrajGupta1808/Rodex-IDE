@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Code Review IDE</title>
   <link rel="stylesheet" href="/styles/base.css?v=5" />
-  <link rel="stylesheet" href="/styles/ide.css?v=9" />
+  <link rel="stylesheet" href="/styles/ide.css?v=10" />
   <!-- Monaco Editor from CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
 </head>
@@ -180,6 +180,18 @@
           </div>
         </div>
 
+        <!-- Cost Analysis -->
+        <div class="section" id="section-cost">
+          <div class="section-header" onclick="toggleSection('cost')">
+            Cost Analysis <span id="cost-chevron">[−]</span>
+          </div>
+          <div class="section-body" id="cost-body">
+            <div class="empty-state" style="height:50px; font-size:11px;">
+              <span style="color:var(--text-muted)">Run analysis to see cost</span>
+            </div>
+          </div>
+        </div>
+
       </div>
     </aside>
 
@@ -198,6 +210,6 @@
 
 <input type="file" id="hidden-file-input-ide" multiple accept=".py,.js,.ts" style="display:none" />
 
-<script type="module" src="/ui/ide.js?v=16"></script>
+<script type="module" src="/ui/ide.js?v=17"></script>
 </body>
 </html>
