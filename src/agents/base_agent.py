@@ -7,6 +7,7 @@ from typing import Any
 
 from ..events.emitter import EventEmitter
 from ..events.schemas import Finding, FixProposal, FixVerification
+from ..events.telemetry import ReviewTelemetry
 from ..sandbox.manager import SandboxManager
 from ..storage.agent_drive import AgentDrive
 
@@ -35,11 +36,13 @@ class BaseAgent(ABC):
         emitter: EventEmitter,
         sandbox_manager: SandboxManager,
         agent_drive: AgentDrive,
+        telemetry: ReviewTelemetry | None = None,
     ) -> None:
         self.agent_id = agent_id
         self.emitter = emitter
         self.sandbox_manager = sandbox_manager
         self.agent_drive = agent_drive
+        self.telemetry = telemetry or ReviewTelemetry(session_id="")
 
     @abstractmethod
     def system_prompt(self) -> str:
@@ -67,13 +70,15 @@ class BaseAgent(ABC):
         try:
             from agents import Agent, Runner  # type: ignore
 
+            from .llm_client import get_model
+
             mcp_servers = await self._mcp_servers()
             agent = Agent(
                 name=self.agent_id,
                 instructions=instructions,
                 tools=tools,
                 mcp_servers=mcp_servers,
-                model="gpt-4o",
+                model=get_model(),
             )
             result = await Runner.run(agent, input=self._build_prompt(context))
             return result.final_output or ""
@@ -82,26 +87,33 @@ class BaseAgent(ABC):
             return await self._run_openai_direct(context, instructions)
 
     async def _mcp_servers(self) -> list[Any]:
-        """Connected MCP servers this agent may use ([] when unconfigured)."""
+        """Connected MCP servers this agent may use ([] when unconfigured).
+
+        Each server is wrapped so the tools the SDK invokes on it appear
+        in the tool log alongside the agent's own calls.
+        """
         manager = getattr(self, "mcp_manager", None)
         if manager is None:
             return []
         try:
-            return await manager.servers_for(self.agent_id)
+            from ..mcp_tools.logging_proxy import LoggingMCPServer
+
+            servers = await manager.servers_for(self.agent_id)
+            return [LoggingMCPServer(server, self.emitter) for server in servers]
         except Exception:  # noqa: BLE001 - MCP must never break a review
             return []
 
     async def _run_openai_direct(
         self, context: SharedContext, instructions: str
     ) -> str:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI()
+        from .llm_client import get_client, get_model
+        client = get_client()
         files_text = "\n\n".join(
             f"=== {name} ===\n{content}"
             for name, content in context.files.items()
         )
         response = await client.chat.completions.create(
-            model="gpt-4o",
+            model=get_model(),
             messages=[
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": f"Analyze the following Python code:\n\n{files_text}"},

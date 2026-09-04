@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
+
 from pydantic import BaseModel, field_serializer
 
 
@@ -20,6 +21,12 @@ class EventType(StrEnum):
     FINDINGS_CONSOLIDATED = "findings_consolidated"
     REVIEW_COMPLETED = "review_completed"
     ERROR = "error"
+    # Agentic coordinator: its own reasoning, decisions, and retries.
+    COORDINATOR_REASONING = "coordinator_reasoning"
+    STEP_STARTED = "step_started"
+    STEP_COMPLETED = "step_completed"
+    DECISION_MADE = "decision_made"
+    RETRY_SCHEDULED = "retry_scheduled"
 
 
 class Severity(StrEnum):
@@ -63,12 +70,12 @@ class AgentEvent(BaseModel):
         agent_id: str,
         session_id: str,
         data: dict[str, Any],
-    ) -> "AgentEvent":
+    ) -> AgentEvent:
         return cls(
             event_type=event_type,
             agent_id=agent_id,
             session_id=session_id,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             data=data,
         )
 

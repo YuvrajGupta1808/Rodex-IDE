@@ -1,20 +1,26 @@
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any
 
-from .base_agent import BaseAgent, AgentResult, SharedContext
-from .security_agent import SecurityAgent
-from .bug_agent import BugDetectionAgent
-from .fix_agent import FixAgent
 from ..events.emitter import EventEmitter
 from ..events.schemas import (
-    EventType, Finding, FixProposal, FixVerification,
-    PlanStep, ReviewResult, Severity,
+    EventType,
+    Finding,
+    FixProposal,
+    FixVerification,
+    PlanStep,
+    ReviewResult,
+    Severity,
 )
+from ..events.telemetry import ReviewTelemetry
 from ..sandbox.manager import SandboxManager
 from ..storage.agent_drive import AgentDrive
+from .agentic_loop import CoordinatorLoop
+from .base_agent import AgentResult, BaseAgent, SharedContext
+from .bug_agent import BugDetectionAgent
+from .fix_agent import FixAgent
+from .security_agent import SecurityAgent
 
 
 class CoordinatorAgent(BaseAgent):
@@ -34,6 +40,7 @@ class CoordinatorAgent(BaseAgent):
         self.sandbox_manager = sandbox_manager
         self.agent_drive = agent_drive
         self._session_id = session_id
+        self.telemetry = ReviewTelemetry(session_id=session_id)
 
     async def analyze(self, context: SharedContext) -> AgentResult:
         raise NotImplementedError("Use run_review() instead")
@@ -56,109 +63,91 @@ class CoordinatorAgent(BaseAgent):
     async def _run_review(
         self, context: SharedContext, event_bus: Any
     ) -> ReviewResult:
+        """Run the review as an agentic loop rather than a fixed script.
+
+        The coordinator decides what to inspect, which specialists to
+        dispatch and with what focus, which findings are real, and whether
+        a failed fix is worth retrying. This method only sets up the
+        participants and turns the loop's outcome into a result payload.
+        """
         start = time.monotonic()
 
-        # Step 1: Upload sources to Agent Drive
         await self.agent_drive.upload_sources(context.session_id, context.files)
+        await self.emitter.agent_started()
 
-        # Step 2: Create and emit plan
-        plan_steps = self._build_plan(context)
-        await self.emitter.emit(EventType.PLAN_CREATED, {
-            "steps": [s.model_dump() for s in plan_steps],
-            "files": list(context.files.keys()),
-            "agents": ["security", "bug_detection", "fix"],
-        })
-        await self.agent_drive.write_plan(context.session_id, {
-            "steps": [s.model_dump() for s in plan_steps],
-        })
-
-        # Step 3: Create specialist agents
-        security_emitter = EventEmitter("security", context.session_id, event_bus)
-        bug_emitter = EventEmitter("bug_detection", context.session_id, event_bus)
-        fix_emitter = EventEmitter("fix", context.session_id, event_bus)
-
-        security_agent = SecurityAgent(
-            "security", security_emitter, self.sandbox_manager, self.agent_drive
-        )
-        bug_agent = BugDetectionAgent(
-            "bug_detection", bug_emitter, self.sandbox_manager, self.agent_drive
-        )
-        fix_agent = FixAgent(
-            "fix", fix_emitter, self.sandbox_manager, self.agent_drive
-        )
-
-        # Attach MCP server manager: specialists gain per-agent context tools
-        # (filesystem, git, dependency data) declared in mcp_servers.json.
-        if self._mcp_manager.configured:
-            await self.emitter.thinking(
-                "MCP servers configured — attaching context tools to specialist agents"
-            )
-        for specialist in (security_agent, bug_agent, fix_agent):
-            specialist.mcp_manager = self._mcp_manager
-
-        # Step 4: Delegate to Security + Bug agents in parallel
-        await self.emitter.emit(EventType.AGENT_DELEGATED, {
-            "agents": ["security", "bug_detection"],
-        })
-        await self.emitter.thinking("Delegating to Security and Bug Detection agents in parallel...")
-
-        results = await asyncio.gather(
-            security_agent.analyze(context),
-            bug_agent.analyze(context),
-            return_exceptions=True,
-        )
-
-        all_findings: list[Finding] = []
-        for result in results:
-            if isinstance(result, Exception):
-                await self.emitter.error(f"Specialist agent error: {result}")
-            elif isinstance(result, AgentResult):
-                all_findings.extend(result.findings)
-
-        # Step 5: Deduplicate and prioritize findings
-        deduped = self._deduplicate(all_findings)
-        await self.emitter.thinking(
-            f"Consolidated {len(all_findings)} raw findings → {len(deduped)} unique findings"
-        )
-
-        # Step 6: Snapshot source files before applying fixes (for rollback)
-        for filename in context.files:
-            await self.agent_drive.snapshot_source(context.session_id, filename)
-
-        # Delegate to Fix Agent — reuse the shared sandbox (already created for session)
-        await self.emitter.emit(EventType.AGENT_DELEGATED, {"agents": ["fix"]})
-        context.existing_findings = deduped
+        specialists, fix_agent = self._build_agents(context, event_bus)
         shared_sandbox = await self.sandbox_manager.get_or_create_sandbox(
             context.session_id, "shared"
         )
-        fix_result = await fix_agent.apply_fixes(deduped, context, sandbox=shared_sandbox)
+        for filename in context.files:
+            await self.agent_drive.snapshot_source(context.session_id, filename)
 
-        # Step 7: Emit consolidated findings
+        loop = CoordinatorLoop(
+            coordinator=self,
+            context=context,
+            specialists=specialists,
+            fix_agent=fix_agent,
+            sandbox=shared_sandbox,
+        )
+        await loop.run()
+
+        findings = self._deduplicate(list(loop.findings.values()))
+        context.existing_findings = findings
+
         await self.emitter.emit(EventType.FINDINGS_CONSOLIDATED, {
-            "total": len(deduped),
-            "by_severity": self._count_by_severity(deduped),
-            "findings": [f.to_dict() for f in deduped],
+            "total": len(findings),
+            "by_severity": self._count_by_severity(findings),
+            "findings": [f.to_dict() for f in findings],
+            "dismissed": [
+                {"finding_id": fid, "reason": reason}
+                for fid, reason in loop.dismissed.items()
+            ],
         })
+        await self.emitter.agent_completed(len(findings))
 
-        # Mark coordinator itself as completed so the UI updates
-        await self.emitter.agent_completed(len(deduped))
-
-        # Step 8: Emit completion payload
         duration_ms = int((time.monotonic() - start) * 1000)
-
         result = self._build_result(
             context.session_id,
-            deduped,
-            fix_result.fix_proposals,
-            fix_result.fix_verifications,
+            findings,
+            loop.fix_proposals,
+            loop.fix_verifications,
             duration_ms,
             context.files,
         )
-        await self.emitter.emit(
-            EventType.REVIEW_COMPLETED,
-            result.model_dump(mode="json", by_alias=True, exclude_none=False),
-        )
+        payload = result.model_dump(mode="json", by_alias=True, exclude_none=False)
+        payload["telemetry"] = self.telemetry.summary()
+        payload["summary"] = loop.summary
+        payload["dismissed"] = [
+            {"finding_id": fid, "reason": reason}
+            for fid, reason in loop.dismissed.items()
+        ]
+        await self.emitter.emit(EventType.REVIEW_COMPLETED, payload)
         return result
+
+    def _build_agents(
+        self, context: SharedContext, event_bus: Any
+    ) -> tuple[dict[str, BaseAgent], FixAgent]:
+        """Construct the specialists and the fix agent for one review."""
+        def make(agent_cls, agent_id: str):
+            return agent_cls(
+                agent_id,
+                EventEmitter(agent_id, context.session_id, event_bus),
+                self.sandbox_manager,
+                self.agent_drive,
+                telemetry=self.telemetry,
+            )
+
+        specialists: dict[str, BaseAgent] = {
+            "security": make(SecurityAgent, "security"),
+            "bug_detection": make(BugDetectionAgent, "bug_detection"),
+        }
+        fix_agent = make(FixAgent, "fix")
+
+        if self._mcp_manager.configured:
+            for agent in (*specialists.values(), fix_agent):
+                agent.mcp_manager = self._mcp_manager
+
+        return specialists, fix_agent
 
     def _build_plan(self, context: SharedContext) -> list[PlanStep]:
         return [

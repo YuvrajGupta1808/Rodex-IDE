@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
-from ..events.schemas import Finding, FixProposal, FixVerification
+from ..events.schemas import Finding
 
 
 class AgentDrive:

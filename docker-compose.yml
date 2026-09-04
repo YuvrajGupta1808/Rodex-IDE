@@ -1,0 +1,23 @@
+services:
+  rodex:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Provider selection — see README. Vertex uses mounted gcloud credentials;
+      # set LLM_PROVIDER=gemini with GEMINI_API_KEY for a key-based setup.
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      LLM_MODEL: ${LLM_MODEL:-gemini-2.5-flash}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      VERTEX_PROJECT_ID: ${VERTEX_PROJECT_ID:-}
+      VERTEX_LOCATION: ${VERTEX_LOCATION:-global}
+      GOOGLE_APPLICATION_CREDENTIALS: /home/rodex/.config/gcloud/application_default_credentials.json
+      BL_API_KEY: ${BL_API_KEY:-}
+      BL_WORKSPACE: ${BL_WORKSPACE:-}
+      MORPH_API_KEY: ${MORPH_API_KEY:-}
+      RODEX_ALLOWED_ORIGINS: ${RODEX_ALLOWED_ORIGINS:-http://localhost:8000}
+    volumes:
+      # Read-only ADC mount so Vertex works without baking keys into the image.
+      - ${HOME}/.config/gcloud:/home/rodex/.config/gcloud:ro
+    restart: unless-stopped

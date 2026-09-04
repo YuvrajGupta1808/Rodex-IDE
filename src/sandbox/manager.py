@@ -59,17 +59,37 @@ class SandboxManager:
                 "ttl": "1h",
             }, safe=True)
             return sandbox
-        except Exception as exc:
+        except Exception:
             return _MockSandbox(name)
 
-    async def write_file(self, sandbox: Any, path: str, content: str) -> None:
+    async def write_file(
+        self, sandbox: Any, path: str, content: str, emitter: Any = None
+    ) -> None:
+        """Write a file into the sandbox, logging the call when an emitter is given.
+
+        A failed write is reported rather than swallowed silently — it
+        previously looked identical to a success in the log.
+        """
+        start = time.monotonic()
+        if emitter is not None:
+            await emitter.tool_call_start(
+                "sandbox.write_file", {"path": path, "bytes": len(content)}
+            )
         try:
             if hasattr(sandbox, "fs"):
                 await sandbox.fs.write(path, content)
             else:
                 await sandbox.filesystem.writeFile(path, content)
-        except Exception:
-            pass
+            error = None
+        except Exception as exc:  # noqa: BLE001 - reported, not raised
+            error = str(exc)
+        if emitter is not None:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            await emitter.tool_call_result(
+                "sandbox.write_file",
+                f"wrote {len(content)} bytes to {path}" if error is None else f"failed: {error}",
+                duration_ms,
+            )
 
     async def read_file(self, sandbox: Any, path: str) -> str:
         try:
@@ -220,7 +240,10 @@ class _MockProcess:
         return type("R", (), {
             "exit_code": exit_code,
             "status": "completed" if exit_code == 0 else "failed",
-            "logs": [type("L", (), {"message": l})() for l in (result.stdout + result.stderr).splitlines()],
+            "logs": [
+                type("L", (), {"message": line})()
+                for line in (result.stdout + result.stderr).splitlines()
+            ],
             "stdout": result.stdout,
             "stderr": result.stderr,
         })()
@@ -231,7 +254,7 @@ class _MockFilesystem:
         self._files = files
 
     async def write(self, path: str, content: str) -> None:
-        import os, pathlib
+        import pathlib
         self._files[path] = content
         # Also write to actual filesystem for local py_compile checks
         try:

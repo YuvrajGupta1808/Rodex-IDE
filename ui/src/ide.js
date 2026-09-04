@@ -169,6 +169,8 @@ btnRun.addEventListener('click', async () => {
   store.fixProposals = {};
   store.fixVerifications = {};
   store.fixedFiles = {};
+  store.activity = [];
+  store._openStepId = null;
   _appliedFixes.clear();
   clearFindingsUI();
 
@@ -255,21 +257,111 @@ function renderPlan() {
 }
 
 // ── Render thoughts (Output panel) ──
+// ── Activity timeline ──
+// The feed used to be one flat line per event, which made a long review
+// unreadable: reasoning, delegations and retries all looked identical.
+// Entries are now grouped — consecutive reasoning collapses into a block,
+// and a delegated step owns the activity that happened inside it.
+
+const AGENT_LABELS = {
+  coordinator: 'Coordinator',
+  security: 'Security',
+  bug_detection: 'Bug Detection',
+  fix: 'Fix Agent',
+};
+
+function agentLabel(id) {
+  return AGENT_LABELS[id] || id;
+}
+
+// Consecutive reasoning/thought lines from one agent become a single block.
+function groupEntries(entries) {
+  const groups = [];
+  for (const entry of entries) {
+    const last = groups[groups.length - 1];
+    const isText = entry.kind === 'reasoning' || entry.kind === 'thought';
+    if (isText && last && last.kind === entry.kind && last.agentId === entry.agentId) {
+      last.lines.push(entry.text);
+    } else if (isText) {
+      groups.push({ kind: entry.kind, agentId: entry.agentId, lines: [entry.text] });
+    } else {
+      groups.push(entry);
+    }
+  }
+  return groups;
+}
+
+function renderTextBlock(group) {
+  // The model marks its own step headers with "›"; promote them so a long
+  // block can be skimmed.
+  const body = group.lines.map(line => {
+    const text = String(line || '');
+    return text.startsWith('›')
+      ? `<div class="act-head">${escapeHtml(text.slice(1).trim())}</div>`
+      : `<div class="act-line">${escapeHtml(text)}</div>`;
+  }).join('');
+  const cls = group.kind === 'reasoning' ? 'act-reasoning' : 'act-thought';
+  return `<div class="act-block ${cls}">
+      <div class="act-agent">${escapeHtml(agentLabel(group.agentId))}</div>
+      <div class="act-body">${body}</div>
+    </div>`;
+}
+
+function renderStep(step) {
+  const outcome = step.outcome || 'running';
+  const badge = outcome === 'ok' ? '✓' : outcome === 'failed' ? '✕' : '•';
+  const children = step.children?.length
+    ? `<div class="act-children">${renderEntries(step.children)}</div>`
+    : '';
+  const summary = step.summary
+    ? `<span class="act-step-summary">${escapeHtml(step.summary)}</span>` : '';
+  const detail = step.detail
+    ? `<div class="act-step-detail">${escapeHtml(step.detail)}</div>` : '';
+  return `<details class="act-step act-step-${outcome}" open>
+      <summary>
+        <span class="act-step-badge">${badge}</span>
+        <span class="act-step-title">${escapeHtml(step.title)}</span>
+        ${summary}
+      </summary>
+      ${detail}${children}
+    </details>`;
+}
+
+function renderEntries(entries) {
+  return groupEntries(entries).map(entry => {
+    if (entry.kind === 'step') return renderStep(entry);
+    if (entry.kind === 'decision') {
+      return `<div class="act-decision">
+          <span class="act-decision-choice">${escapeHtml(entry.choice)}</span>
+          <span class="act-decision-why">${escapeHtml(entry.rationale || '')}</span>
+        </div>`;
+    }
+    if (entry.kind === 'retry') {
+      return `<div class="act-retry">
+          <span class="act-retry-tag">retry ${entry.attempt}/${entry.maxAttempts}</span>
+          <span>${escapeHtml(entry.target)} — ${escapeHtml(entry.reason || '')}</span>
+        </div>`;
+    }
+    return renderTextBlock(entry);
+  }).join('');
+}
+
 function renderThoughts() {
   const stream = document.getElementById('thought-stream');
   if (!stream) return;
-  const last = store.thoughts.slice(-50);
-  if (!last.length) {
-    stream.innerHTML = `<div class="empty-state"><span>Agent reasoning will appear here</span></div>`;
+
+  const entries = store.activity || [];
+  if (!entries.length) {
+    stream.innerHTML =
+      `<div class="empty-state"><span>Agent reasoning will appear here</span></div>`;
     return;
   }
-  stream.innerHTML = last.map((t, i) => `
-    <div class="thought-line ${i === last.length - 1 ? 'new' : ''}">
-      <span style="color:var(--text-muted);font-size:10px">[${t.agentId}]</span>
-      ${escapeHtml(t.text || '')}
-    </div>
-  `).join('');
-  stream.scrollTop = stream.scrollHeight;
+
+  // Keep the view pinned to the newest activity unless the user scrolled up
+  // to read something — yanking the scroll position mid-read is hostile.
+  const pinned = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 60;
+  stream.innerHTML = renderEntries(entries.slice(-200));
+  if (pinned) stream.scrollTop = stream.scrollHeight;
 }
 
 // ── Interactive terminal (Terminal tab) ──

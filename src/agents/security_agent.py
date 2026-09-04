@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+import time
 
-from .base_agent import BaseAgent, AgentResult, SharedContext
 from ..events.schemas import Finding, Severity
+from .base_agent import AgentResult, BaseAgent, SharedContext
 
 SYSTEM_PROMPT = """You are a specialized security code reviewer for Python code.
 
@@ -75,37 +75,55 @@ class SecurityAgent(BaseAgent):
         return AgentResult(agent_id=self.agent_id, findings=findings)
 
     async def _run_with_streaming(self, context: SharedContext, files_text: str) -> str:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI()
+        from .llm_client import get_client, get_model, thinking_extra_body, tool_name
+        from .mcp_context import gather as gather_mcp_context
+        from .streaming import stream_thinking, summarize_response
+        client = get_client()
+        model = get_model()
 
         await self.emitter.thinking("Scanning for SQL injection patterns...")
-        await self.emitter.tool_call_start("openai.chat", {"model": "gpt-4o", "focus": "security"})
+        tool = tool_name()
+        await self.emitter.tool_call_start(tool, {"model": model, "focus": "security"})
 
-        full_response = ""
+        mcp_context = await gather_mcp_context(await self._mcp_servers(), self.emitter)
+        # The coordinator dispatches with a focus naming what it wants
+        # scrutinised; honour it so delegation is more than decorative.
+        focus = (context.metadata or {}).get("focus", "")
+        focus_note = (
+            f"The coordinator asked you to focus on: {focus}\n\n" if focus else ""
+        )
+
         stream = await client.chat.completions.create(
-            model="gpt-4o",
+            model=model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Analyze these Python files for security vulnerabilities:\n\n{files_text}"},
+                {"role": "user", "content": f"{mcp_context}{focus_note}Analyze these Python files for security vulnerabilities:\n\n{files_text}"},
             ],
             stream=True,
             temperature=0,
+            stream_options={"include_usage": True},
+            extra_body=thinking_extra_body(),
         )
 
-        chunk_buffer = ""
-        async for chunk in stream:
-            delta = chunk.choices[0].delta.content or ""
-            full_response += delta
-            chunk_buffer += delta
-            if len(chunk_buffer) > 80:
-                await self.emitter.thinking(chunk_buffer.strip())
-                chunk_buffer = ""
+        started = time.monotonic()
+        usage_holder: dict = {}
 
-        if chunk_buffer.strip():
-            await self.emitter.thinking(chunk_buffer.strip())
+        def _record(usage):
+            usage_holder["usage"] = usage
+            self.telemetry.record_usage(
+                self.agent_id, model, usage, int((time.monotonic() - started) * 1000)
+            )
 
-        import time
-        await self.emitter.tool_call_result("openai.chat", f"{len(full_response)} chars", 0)
+        full_response = await stream_thinking(
+            stream,
+            self.emitter,
+            on_usage=_record,
+        )
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await self.emitter.tool_call_result(
+            tool, summarize_response(full_response, usage_holder.get("usage")), duration_ms
+        )
         return full_response
 
     def _parse_findings(self, raw: str, context: SharedContext) -> list[Finding]:

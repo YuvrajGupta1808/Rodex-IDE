@@ -24,7 +24,7 @@ class ReviewSession:
     error: str | None = None
 
     @classmethod
-    def create(cls, files: dict[str, str]) -> "ReviewSession":
+    def create(cls, files: dict[str, str]) -> ReviewSession:
         session_id = str(uuid.uuid4())
         return cls(
             session_id=session_id,
