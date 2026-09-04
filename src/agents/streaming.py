@@ -73,15 +73,69 @@ class _FindingNarrator:
         return out
 
 
+class _ThoughtSplitter:
+    """Separates a model's streamed reasoning from its JSON answer.
+
+    With ``include_thoughts`` the provider streams reasoning as ordinary
+    content ahead of the answer, marked by ``**Bold headers**``. Reasoning
+    is shown live; the JSON answer is left to the finding narrator.
+    """
+
+    _HEADER = re.compile(r"\*\*(.+?)\*\*")
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._answer_started = False
+
+    def feed(self, delta: str) -> list[str]:
+        """Readable reasoning fragments contained in this delta."""
+        if self._answer_started:
+            return []
+
+        self._buffer += delta
+        # The JSON answer begins at the first fence or bare array/object.
+        for marker in ("```", "[", "{"):
+            index = self._buffer.find(marker)
+            if index != -1:
+                self._answer_started = True
+                self._buffer = self._buffer[:index]
+                break
+
+        fragments: list[str] = []
+        # Emit only whole paragraphs so sentences are never cut mid-word.
+        while "\n\n" in self._buffer:
+            paragraph, self._buffer = self._buffer.split("\n\n", 1)
+            fragments.extend(self._render(paragraph))
+        if self._answer_started and self._buffer.strip():
+            fragments.extend(self._render(self._buffer))
+            self._buffer = ""
+        return fragments
+
+    def _render(self, paragraph: str) -> list[str]:
+        text = paragraph.strip()
+        if not text:
+            return []
+        # A bold header is the model naming its current step.
+        header = self._HEADER.match(text)
+        if header:
+            rest = text[header.end():].strip()
+            out = [f"› {header.group(1).strip()}"]
+            return out + _readable_fragments(rest) if rest else out
+        return _readable_fragments(text)
+
+
 async def stream_thinking(stream, emitter, on_usage=None) -> str:
     """Consume an OpenAI-style stream, emitting readable progress.
 
-    Returns the full raw response so the caller can parse findings.
+    Reasoning is streamed as it arrives so the panel fills during the
+    long pause before an answer; findings are then announced from the
+    JSON payload. Returns the full raw response for the caller to parse.
     ``on_usage`` receives the provider's usage object when one is sent
     (providers report it on a final, choice-less chunk).
     """
     full_response = ""
     narrator = _FindingNarrator()
+    thoughts = _ThoughtSplitter()
 
     async for chunk in stream:
         usage = getattr(chunk, "usage", None)
@@ -93,6 +147,9 @@ async def stream_thinking(stream, emitter, on_usage=None) -> str:
         if not delta:
             continue
         full_response += delta
+
+        for fragment in thoughts.feed(delta):
+            await emitter.thinking(fragment)
         for line in narrator.new_lines(full_response):
             for fragment in _readable_fragments(line):
                 await emitter.thinking(fragment)

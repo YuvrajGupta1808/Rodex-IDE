@@ -144,3 +144,47 @@ def test_summary_singular_finding():
 
     one = '[{"description": "only one"}]'
     assert "1 finding ·" in summarize_response(one)
+
+
+THINKING_RESPONSE = (
+    "**Analyzing Code**\n\nI am examining the query construction. "
+    "It interpolates user input.\n\n"
+    "**Confirming Vulnerability**\n\nThis is SQL injection.\n\n"
+    '```json\n[{"file": "m.py", "line": 4, "severity": "critical",'
+    ' "category": "sql_injection", "description": "F-string in query."}]\n```'
+)
+
+
+@pytest.mark.asyncio
+async def test_reasoning_streams_before_the_answer():
+    """Regression: the panel was silent during the model's long think.
+
+    Reasoning must reach the user as it arrives, not only once the JSON
+    answer is complete.
+    """
+    emitter = _Emitter()
+
+    await stream_thinking(_Stream(THINKING_RESPONSE, 30), emitter)
+
+    joined = " ".join(emitter.messages)
+    # Reasoning is surfaced, with step headers marked.
+    assert "› Analyzing Code" in joined
+    assert "I am examining the query construction." in joined
+    assert "› Confirming Vulnerability" in joined
+    # The finding is still announced afterwards.
+    assert "[CRITICAL] sql injection (line 4)" in joined
+    # Reasoning arrives before the finding.
+    reasoning_at = next(i for i, m in enumerate(emitter.messages) if "Analyzing Code" in m)
+    finding_at = next(i for i, m in enumerate(emitter.messages) if "[CRITICAL]" in m)
+    assert reasoning_at < finding_at
+
+
+@pytest.mark.asyncio
+async def test_json_answer_is_never_shown_as_reasoning():
+    emitter = _Emitter()
+
+    await stream_thinking(_Stream(THINKING_RESPONSE, 30), emitter)
+
+    joined = " ".join(emitter.messages)
+    assert '"severity"' not in joined
+    assert "```" not in joined

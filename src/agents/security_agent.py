@@ -75,7 +75,7 @@ class SecurityAgent(BaseAgent):
         return AgentResult(agent_id=self.agent_id, findings=findings)
 
     async def _run_with_streaming(self, context: SharedContext, files_text: str) -> str:
-        from .llm_client import get_client, get_model, tool_name
+        from .llm_client import get_client, get_model, thinking_extra_body, tool_name
         from .streaming import stream_thinking, summarize_response
         client = get_client()
         model = get_model()
@@ -93,6 +93,7 @@ class SecurityAgent(BaseAgent):
             stream=True,
             temperature=0,
             stream_options={"include_usage": True},
+            extra_body=thinking_extra_body(),
         )
 
         started = time.monotonic()

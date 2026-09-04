@@ -97,6 +97,18 @@ def tool_name(action: str = "chat") -> str:
     return f"{_provider()}.{action}"
 
 
+def thinking_extra_body() -> dict:
+    """Provider options that stream the model's reasoning, if supported.
+
+    Gemini 2.5 models reason before answering. Without this the reasoning
+    is billed but never sent, so the UI shows nothing during the pause
+    before the answer arrives.
+    """
+    if _provider() in ("vertex", "gemini"):
+        return {"google": {"thinking_config": {"include_thoughts": True}}}
+    return {}
+
+
 def get_client():
     """An ``AsyncOpenAI`` client pointed at the configured provider."""
     from openai import AsyncOpenAI
