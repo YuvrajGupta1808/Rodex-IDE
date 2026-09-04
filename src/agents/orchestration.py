@@ -38,6 +38,9 @@ user.
 2. Dispatch specialists with a specific `focus` describing what you want \
 scrutinised in THIS code. A focus like "check the SQL string built from \
 `user_id` on line 4" is far more useful than "look for security issues".
+   Request every specialist you want in the SAME turn — they run in \
+parallel, so dispatching them together costs no more time than one. \
+Dispatching them one after another wastes minutes for no benefit.
 3. When findings return, judge them. Use `dismiss_finding` on anything \
 that is not a real defect — a false positive wastes the user's time, and \
 you are the last line of defence against one.

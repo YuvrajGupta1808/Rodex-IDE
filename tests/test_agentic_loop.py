@@ -270,3 +270,134 @@ async def test_malformed_arguments_do_not_crash_the_loop():
     out = await loop._dispatch({"name": "inspect_code", "arguments": "{not json"})
 
     assert "=== m.py ===" in out
+
+
+class _SlowSpecialist:
+    """Records when it ran, so overlap can be asserted."""
+
+    def __init__(self, findings, delay=0.05, log=None):
+        self._findings = findings
+        self._delay = delay
+        self.log = log if log is not None else []
+
+    async def analyze(self, context):
+        import asyncio as _asyncio
+
+        self.log.append(("start", id(self)))
+        await _asyncio.sleep(self._delay)
+        self.log.append(("end", id(self)))
+        return type("R", (), {"findings": self._findings})()
+
+
+@pytest.mark.asyncio
+async def test_specialists_dispatched_together_run_concurrently():
+    """Regression: the agentic rewrite serialised the specialists.
+
+    The scripted coordinator ran them with asyncio.gather; the tool loop
+    awaited each call in turn, so a review paid for both sequentially —
+    measured at nearly three minutes of dead wall-clock in one run.
+    """
+    import asyncio as _asyncio
+
+    log = []
+    emitter = _Emitter()
+    loop = CoordinatorLoop(
+        coordinator=_Coordinator(emitter),
+        context=_Context(),
+        specialists={
+            "security": _SlowSpecialist([_finding("a")], log=log),
+            "bug_detection": _SlowSpecialist([_finding("b")], log=log),
+        },
+        fix_agent=_FixAgent(),
+        sandbox=object(),
+    )
+
+    calls = [
+        {"id": "1", "name": "run_specialist",
+         "arguments": '{"agent":"security","focus":"x"}'},
+        {"id": "2", "name": "run_specialist",
+         "arguments": '{"agent":"bug_detection","focus":"y"}'},
+    ]
+    started = _asyncio.get_running_loop().time()
+    results = await loop._dispatch_batch(calls)
+    elapsed = _asyncio.get_running_loop().time() - started
+
+    assert len(results) == 2
+    # Both started before either finished — genuine overlap, not interleaving.
+    assert [kind for kind, _ in log[:2]] == ["start", "start"]
+    # Two 0.05s agents run together take well under the 0.1s serial cost.
+    assert elapsed < 0.09
+    assert set(loop.findings) == {"a", "b"}
+
+
+@pytest.mark.asyncio
+async def test_results_stay_aligned_with_their_tool_calls():
+    """Parallel dispatch must not reorder results relative to calls."""
+    loop, _ = _loop(specialist=_Specialist([_finding()]))
+
+    calls = [
+        {"id": "1", "name": "inspect_code", "arguments": "{}"},
+        {"id": "2", "name": "run_specialist",
+         "arguments": '{"agent":"security","focus":"x"}'},
+    ]
+    results = await loop._dispatch_batch(calls)
+
+    assert "=== m.py ===" in results[0]
+    assert "security returned" in results[1]
+
+
+@pytest.mark.asyncio
+async def test_one_failing_specialist_does_not_sink_the_batch():
+    class _Boom:
+        async def analyze(self, context):
+            raise RuntimeError("specialist crashed")
+
+    emitter = _Emitter()
+    loop = CoordinatorLoop(
+        coordinator=_Coordinator(emitter),
+        context=_Context(),
+        specialists={"security": _Specialist([_finding()]), "bug_detection": _Boom()},
+        fix_agent=_FixAgent(),
+        sandbox=object(),
+    )
+
+    results = await loop._dispatch_batch([
+        {"id": "1", "name": "run_specialist",
+         "arguments": '{"agent":"security","focus":"x"}'},
+        {"id": "2", "name": "run_specialist",
+         "arguments": '{"agent":"bug_detection","focus":"y"}'},
+    ])
+
+    assert "security returned" in results[0]
+    assert "failed" in results[1].lower()
+    # The healthy specialist's findings survive.
+    assert "f1" in loop.findings
+
+
+@pytest.mark.asyncio
+async def test_fixes_are_not_run_concurrently():
+    """Fixes mutate shared file contents, so they must stay serialised."""
+    order = []
+
+    class _OrderedFix(_FixAgent):
+        async def apply_fixes(self, findings, context, sandbox=None):
+            import asyncio as _asyncio
+
+            order.append(("start", findings[0].finding_id))
+            await _asyncio.sleep(0.02)
+            order.append(("end", findings[0].finding_id))
+            return await super().apply_fixes(findings, context, sandbox)
+
+    loop, _ = _loop(specialist=_Specialist([_finding("a"), _finding("b")]),
+                    fix_agent=_OrderedFix())
+    await loop._dispatch(
+        {"name": "run_specialist", "arguments": '{"agent":"security","focus":"x"}'}
+    )
+
+    await loop._dispatch_batch([
+        {"id": "1", "name": "apply_fix", "arguments": '{"finding_id":"a"}'},
+        {"id": "2", "name": "apply_fix", "arguments": '{"finding_id":"b"}'},
+    ])
+
+    # Each fix completes before the next begins.
+    assert order == [("start", "a"), ("end", "a"), ("start", "b"), ("end", "b")]

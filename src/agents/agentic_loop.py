@@ -12,6 +12,7 @@ actual work, exactly as before.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -29,6 +30,10 @@ from .orchestration import (
 logger = logging.getLogger(__name__)
 
 _MAX_TOOL_RESULT_CHARS = 4000
+
+# Tools that only read the source and share no mutable state, so several
+# may run at once. Everything else is serialised.
+_CONCURRENT_TOOLS = frozenset({"run_specialist", "inspect_code"})
 
 
 def _numbered(source: str) -> str:
@@ -130,12 +135,16 @@ class CoordinatorLoop:
                 }
             )
 
-            for call in tool_calls:
-                if call["name"] == "finish_review":
-                    self.summary = _parse_args(call["arguments"]).get("summary", "")
-                    await self._emitter.reasoning(self.summary or "Review complete.")
-                    return
-                result = await self._dispatch(call)
+            finish = next(
+                (c for c in tool_calls if c["name"] == "finish_review"), None
+            )
+            if finish is not None:
+                self.summary = _parse_args(finish["arguments"]).get("summary", "")
+                await self._emitter.reasoning(self.summary or "Review complete.")
+                return
+
+            results = await self._dispatch_batch(tool_calls)
+            for call, result in zip(tool_calls, results, strict=True):
                 messages.append(
                     {
                         "role": "tool",
@@ -150,6 +159,45 @@ class CoordinatorLoop:
         )
 
     # ── tool dispatch ───────────────────────────────────────────────────
+
+    async def _dispatch_batch(self, calls: list[dict[str, Any]]) -> list[str]:
+        """Run a turn's tool calls, concurrently where that is safe.
+
+        Specialists analyse the same immutable source and share nothing, so
+        running them together is both safe and the point — a review that
+        dispatches security and bug detection should not pay for them twice
+        in wall-clock time.
+
+        Everything else is serialised. Fixes mutate the shared file
+        contents, and inspection should observe the state left by fixes in
+        the same turn, so those run in the order the model asked for them.
+        """
+        concurrent = [c for c in calls if c["name"] in _CONCURRENT_TOOLS]
+        serial = [c for c in calls if c["name"] not in _CONCURRENT_TOOLS]
+
+        results: dict[int, str] = {}
+        if len(concurrent) > 1:
+            await self._emitter.decision(
+                choice=f"run {len(concurrent)} specialists in parallel",
+                rationale="they analyse the same source and share no state",
+            )
+
+        if concurrent:
+            gathered = await asyncio.gather(
+                *(self._dispatch(call) for call in concurrent),
+                return_exceptions=True,
+            )
+            for call, outcome in zip(concurrent, gathered, strict=True):
+                results[id(call)] = (
+                    f"Tool {call['name']} failed: {outcome}"
+                    if isinstance(outcome, BaseException)
+                    else outcome
+                )
+
+        for call in serial:
+            results[id(call)] = await self._dispatch(call)
+
+        return [results[id(call)] for call in calls]
 
     async def _dispatch(self, call: dict[str, Any]) -> str:
         name = call["name"]
