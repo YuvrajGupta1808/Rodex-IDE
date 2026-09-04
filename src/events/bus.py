@@ -20,6 +20,16 @@ class AsyncEventBus:
         for q in queues:
             await q.put(event)
 
+    def open_subscription(self, session_id: str) -> Subscription:
+        """A subscription that can be polled with a timeout.
+
+        ``subscribe`` is an async generator, so waiting on it with
+        ``asyncio.wait_for`` cancels the generator and silently ends the
+        subscription. Streaming endpoints that need an idle timeout (to
+        send keepalives) use this instead.
+        """
+        return Subscription(self, session_id)
+
     async def subscribe(
         self, session_id: str, replay_from: int = 0
     ) -> AsyncGenerator[AgentEvent, None]:
@@ -47,3 +57,32 @@ class AsyncEventBus:
 
     def clear_history(self, session_id: str) -> None:
         self._history.pop(session_id, None)
+
+
+class Subscription:
+    """Queue-backed view of a session's events, safe to poll with timeouts."""
+
+    def __init__(self, bus: AsyncEventBus, session_id: str) -> None:
+        self._bus = bus
+        self._session_id = session_id
+        self._queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
+        bus._subscribers[session_id].append(self._queue)
+
+    def replay(self, replay_from: int = 0) -> list[AgentEvent]:
+        """Events already published, from the given index."""
+        return list(self._bus._history[self._session_id][replay_from:])
+
+    async def next_event(self, timeout: float) -> AgentEvent | None:
+        """Next live event, or None when ``timeout`` elapses first.
+
+        A timeout leaves the subscription intact — nothing is cancelled.
+        """
+        try:
+            return await asyncio.wait_for(self._queue.get(), timeout=timeout)
+        except TimeoutError:
+            return None
+
+    def close(self) -> None:
+        subscribers = self._bus._subscribers.get(self._session_id, [])
+        if self._queue in subscribers:
+            subscribers.remove(self._queue)

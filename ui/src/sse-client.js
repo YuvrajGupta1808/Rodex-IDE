@@ -24,11 +24,16 @@ export class SSEClient {
     };
 
     this._es.onmessage = (e) => {
+      let event;
       try {
-        const event = JSON.parse(e.data);
-        this._lastEventId = parseInt(e.lastEventId || this._lastEventId) + 1;
-        this.onEvent(event);
-      } catch (_) {}
+        event = JSON.parse(e.data);
+      } catch (_) {
+        return;   // keepalive comments and malformed frames are ignored
+      }
+      // The server replays *from* this index, so resume at the next one.
+      const id = parseInt(e.lastEventId, 10);
+      if (!Number.isNaN(id)) this._lastEventId = id + 1;
+      this.onEvent(event);
     };
 
     this._es.onerror = () => {

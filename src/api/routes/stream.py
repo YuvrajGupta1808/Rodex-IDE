@@ -8,6 +8,10 @@ from ..dependencies import get_event_bus
 
 router = APIRouter(prefix="/api", tags=["stream"])
 
+# Long enough to stay quiet during normal streaming, short enough to keep
+# idle proxies and browsers from closing the connection mid-review.
+_KEEPALIVE_SECONDS = 15.0
+
 
 @router.get("/stream/{session_id}")
 async def stream_events(
@@ -20,12 +24,28 @@ async def stream_events(
 
     async def event_generator():
         idx = replay_from
-        async for event in event_bus.subscribe(session_id, replay_from=replay_from):
-            if await request.is_disconnected():
-                break
-            # Include event index as SSE id for reconnect
-            yield f"id: {idx}\n{event.to_sse()}"
-            idx += 1
+        subscription = event_bus.open_subscription(session_id)
+        try:
+            for event in subscription.replay(replay_from):
+                yield f"id: {idx}\n{event.to_sse()}"
+                idx += 1
+
+            while True:
+                # A review can go a minute between events while an agent
+                # reasons. Without a keepalive the idle connection is closed
+                # and the client never receives review_completed, leaving the
+                # UI stuck mid-run. A timeout here must not end the
+                # subscription, which is why this is not a plain `async for`.
+                event = await subscription.next_event(_KEEPALIVE_SECONDS)
+                if await request.is_disconnected():
+                    break
+                if event is None:
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"id: {idx}\n{event.to_sse()}"
+                idx += 1
+        finally:
+            subscription.close()
 
     return StreamingResponse(
         event_generator(),
