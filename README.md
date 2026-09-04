@@ -42,6 +42,8 @@ Each specialist agent can be granted tools from external [Model Context Protocol
 
 - `agents` restricts which specialists may use a server's tools (omit it to allow all) — e.g. give the security agent `fetch` for advisory lookups while keeping the fix agent offline
 - Servers connect lazily per review session, are shared across agents, and are cleaned up when the review completes — even when the review fails
+- Before analysing, each specialist gathers context from the read-only tools its servers expose (e.g. `git_status`, `git_diff_unstaged`) and prepends it to the prompt, so findings are judged against the repository's current state
+- Every MCP tool call is logged like any other tool — `mcp.<server>.<tool>` with arguments, duration, and output — via a transparent proxy around the server
 - A missing config file, a malformed entry, or a server that fails to start all degrade gracefully — reviews run exactly as before, with no MCP tools attached
 
 ## Security Defaults

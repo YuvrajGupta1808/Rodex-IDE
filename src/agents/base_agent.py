@@ -87,12 +87,19 @@ class BaseAgent(ABC):
             return await self._run_openai_direct(context, instructions)
 
     async def _mcp_servers(self) -> list[Any]:
-        """Connected MCP servers this agent may use ([] when unconfigured)."""
+        """Connected MCP servers this agent may use ([] when unconfigured).
+
+        Each server is wrapped so the tools the SDK invokes on it appear
+        in the tool log alongside the agent's own calls.
+        """
         manager = getattr(self, "mcp_manager", None)
         if manager is None:
             return []
         try:
-            return await manager.servers_for(self.agent_id)
+            from ..mcp_tools.logging_proxy import LoggingMCPServer
+
+            servers = await manager.servers_for(self.agent_id)
+            return [LoggingMCPServer(server, self.emitter) for server in servers]
         except Exception:  # noqa: BLE001 - MCP must never break a review
             return []
 

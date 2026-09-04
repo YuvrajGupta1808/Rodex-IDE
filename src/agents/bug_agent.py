@@ -80,6 +80,7 @@ class BugDetectionAgent(BaseAgent):
 
     async def _run_with_streaming(self, context: SharedContext, files_text: str) -> str:
         from .llm_client import get_client, get_model, thinking_extra_body, tool_name
+        from .mcp_context import gather as gather_mcp_context
         from .streaming import stream_thinking, summarize_response
         client = get_client()
         model = get_model()
@@ -88,11 +89,13 @@ class BugDetectionAgent(BaseAgent):
         tool = tool_name()
         await self.emitter.tool_call_start(tool, {"model": model, "focus": "bugs"})
 
+        mcp_context = await gather_mcp_context(await self._mcp_servers(), self.emitter)
+
         stream = await client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Analyze these Python files for bugs and logic errors:\n\n{files_text}"},
+                {"role": "user", "content": f"{mcp_context}Analyze these Python files for bugs and logic errors:\n\n{files_text}"},
             ],
             stream=True,
             temperature=0,
