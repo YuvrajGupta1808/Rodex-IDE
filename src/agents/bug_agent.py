@@ -90,12 +90,18 @@ class BugDetectionAgent(BaseAgent):
         await self.emitter.tool_call_start(tool, {"model": model, "focus": "bugs"})
 
         mcp_context = await gather_mcp_context(await self._mcp_servers(), self.emitter)
+        # The coordinator dispatches with a focus naming what it wants
+        # scrutinised; honour it so delegation is more than decorative.
+        focus = (context.metadata or {}).get("focus", "")
+        focus_note = (
+            f"The coordinator asked you to focus on: {focus}\n\n" if focus else ""
+        )
 
         stream = await client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"{mcp_context}Analyze these Python files for bugs and logic errors:\n\n{files_text}"},
+                {"role": "user", "content": f"{mcp_context}{focus_note}Analyze these Python files for bugs and logic errors:\n\n{files_text}"},
             ],
             stream=True,
             temperature=0,

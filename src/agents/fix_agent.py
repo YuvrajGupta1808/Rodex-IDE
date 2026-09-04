@@ -103,6 +103,11 @@ class FixAgent(BaseAgent):
 
         from .llm_client import tool_name
         fix_tool = tool_name("fix_generation")
+        # On a retry the coordinator explains what went wrong last time.
+        guidance = (context.metadata or {}).get("fix_guidance", "")
+        guidance_note = (
+            f"Guidance from the coordinator: {guidance}\n\n" if guidance else ""
+        )
         await self.emitter.tool_call_start(
             fix_tool,
             {"file": finding.file, "line": finding.line, "category": finding.category},
@@ -122,6 +127,7 @@ class FixAgent(BaseAgent):
                             f"Finding: {finding.category} — {finding.description}\n"
                             f"File: {finding.file}, Line: {finding.line}\n\n"
                             f"Code context (with line numbers):\n{numbered}\n\n"
+                            f"{guidance_note}"
                             f"The original_code field MUST be an exact substring from the code above."
                         ),
                     },

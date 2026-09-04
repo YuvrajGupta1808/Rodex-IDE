@@ -111,6 +111,14 @@ class _ThoughtSplitter:
             self._buffer = ""
         return fragments
 
+    def flush(self) -> list[str]:
+        """Whatever reasoning is still buffered when the stream ends."""
+        if self._answer_started or not self._buffer.strip():
+            return []
+        fragments = self._render(self._buffer)
+        self._buffer = ""
+        return fragments
+
     def _render(self, paragraph: str) -> list[str]:
         text = paragraph.strip()
         if not text:
@@ -182,3 +190,54 @@ def summarize_response(raw: str, usage=None) -> str:
             parts.append(f"{reasoning} reasoning")
     parts.append(f"{len(raw)} chars")
     return " · ".join(parts)
+
+
+async def stream_reasoning(stream, emitter):
+    """Consume a tool-calling stream, emitting the model's reasoning live.
+
+    Unlike ``stream_thinking`` the payload here is tool calls rather than
+    a JSON findings array, so the assistant text is all reasoning and is
+    surfaced in full. Returns ``(text, tool_calls, usage)`` where each
+    tool call is ``{"id", "name", "arguments"}``.
+    """
+    text = ""
+    usage = None
+    thoughts = _ThoughtSplitter()
+    # Tool calls stream in fragments keyed by index; reassemble them.
+    partial: dict[int, dict] = {}
+
+    async for chunk in stream:
+        chunk_usage = getattr(chunk, "usage", None)
+        if chunk_usage is not None:
+            usage = chunk_usage
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+
+        content = getattr(delta, "content", None) or ""
+        if content:
+            text += content
+            for fragment in thoughts.feed(content):
+                await emitter.reasoning(fragment)
+
+        for call in getattr(delta, "tool_calls", None) or []:
+            slot = partial.setdefault(
+                call.index, {"id": "", "name": "", "arguments": ""}
+            )
+            if call.id:
+                slot["id"] = call.id
+            function = getattr(call, "function", None)
+            if function is not None:
+                if function.name:
+                    slot["name"] = function.name
+                if function.arguments:
+                    slot["arguments"] += function.arguments
+
+    # Any reasoning still buffered when the stream ends.
+    for fragment in thoughts.flush():
+        await emitter.reasoning(fragment)
+
+    tool_calls = [
+        call for _, call in sorted(partial.items()) if call["name"]
+    ]
+    return text, tool_calls, usage

@@ -21,6 +21,12 @@ class EventType(StrEnum):
     FINDINGS_CONSOLIDATED = "findings_consolidated"
     REVIEW_COMPLETED = "review_completed"
     ERROR = "error"
+    # Agentic coordinator: its own reasoning, decisions, and retries.
+    COORDINATOR_REASONING = "coordinator_reasoning"
+    STEP_STARTED = "step_started"
+    STEP_COMPLETED = "step_completed"
+    DECISION_MADE = "decision_made"
+    RETRY_SCHEDULED = "retry_scheduled"
 
 
 class Severity(StrEnum):

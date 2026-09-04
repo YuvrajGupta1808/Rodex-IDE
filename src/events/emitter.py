@@ -45,5 +45,44 @@ class EventEmitter:
     async def fix_verified(self, verification_data: dict[str, Any]) -> None:
         await self.emit(EventType.FIX_VERIFIED, verification_data)
 
+    async def reasoning(self, text: str) -> None:
+        """The coordinator's own deliberation, distinct from an agent's."""
+        await self.emit(EventType.COORDINATOR_REASONING, {"text": text})
+
+    async def step_started(self, step_id: str, title: str, detail: str = "") -> None:
+        await self.emit(
+            EventType.STEP_STARTED,
+            {"step_id": step_id, "title": title, "detail": detail},
+        )
+
+    async def step_completed(
+        self, step_id: str, outcome: str, summary: str = ""
+    ) -> None:
+        """Close a step. ``outcome`` is one of ok | failed | skipped."""
+        await self.emit(
+            EventType.STEP_COMPLETED,
+            {"step_id": step_id, "outcome": outcome, "summary": summary},
+        )
+
+    async def decision(self, choice: str, rationale: str, options: Any = None) -> None:
+        """A branch the coordinator chose, and why."""
+        await self.emit(
+            EventType.DECISION_MADE,
+            {"choice": choice, "rationale": rationale, "options": options or []},
+        )
+
+    async def retry_scheduled(
+        self, target: str, attempt: int, max_attempts: int, reason: str
+    ) -> None:
+        await self.emit(
+            EventType.RETRY_SCHEDULED,
+            {
+                "target": target,
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "reason": reason,
+            },
+        )
+
     async def error(self, message: str) -> None:
         await self.emit(EventType.ERROR, {"message": message, "state": "error"})
