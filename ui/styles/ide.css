@@ -526,14 +526,70 @@
   overflow: hidden;
 }
 
+/* The sidebar used to scroll as one column, so a long execution plan
+   pushed Cost Analysis off the bottom where it could not be seen. Agents
+   and Cost Analysis are now pinned and only the plan scrolls. */
 .right-panel-sections {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-.section { border-bottom: 1px solid var(--border); }
+.section {
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+/* The plan takes the leftover height and scrolls inside itself. */
+#section-plan {
+  flex: 1 1 auto;
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#section-plan .section-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Collapsed, the plan must give its leftover height back. */
+#section-plan.collapsed { flex: none; min-height: 0; }
+
+/* Cost analysis stays visible at the bottom regardless of plan length. */
+#section-cost {
+  flex: none;
+  border-bottom: none;
+  max-height: 45%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#section-cost .section-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* A slim scrollbar so the pinned panels do not look cluttered. */
+#section-plan .section-body::-webkit-scrollbar,
+#section-cost .section-body::-webkit-scrollbar { width: 8px; }
+
+#section-plan .section-body::-webkit-scrollbar-thumb,
+#section-cost .section-body::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.12);
+  border-radius: 4px;
+}
+
+#section-plan .section-body::-webkit-scrollbar-thumb:hover,
+#section-cost .section-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.2);
+}
 
 .section-header {
   display: flex;

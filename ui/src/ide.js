@@ -1021,6 +1021,10 @@ function toggleSection(name) {
   const hidden = body.style.display === 'none';
   body.style.display = hidden ? '' : 'none';
   if (chevron) chevron.textContent = hidden ? '[−]' : '[+]';
+  // The plan grows to fill the sidebar; collapsed it must give that space
+  // back rather than holding an empty gap above the cost panel.
+  const section = document.getElementById(`section-${name}`);
+  if (section) section.classList.toggle('collapsed', !hidden);
 }
 window.toggleSection = toggleSection;
 
