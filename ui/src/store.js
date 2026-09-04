@@ -20,6 +20,7 @@ export const store = {
   // activity that occurred while they were open.
   activity: [],      // [{kind, agentId, ...}]
   _openStepId: null,
+  lastError: null,
   toolCalls: [],     // [{agentId, toolName, inputs, output, durationMs, ok}]
   findings: [],      // Finding objects
   fixProposals: {},  // findingId -> FixProposal
@@ -170,7 +171,16 @@ export const store = {
 
       case 'error':
         this._setAgentState(agent_id, 'error');
+        // Surface the failure in the timeline too. Tinting a status dot
+        // red left the panel looking merely idle, with the run button
+        // stuck on "Analyzing..." and no way to tell what went wrong.
+        this._pushActivity({
+          kind: 'failure', agentId: agent_id, text: data?.message || 'Unknown error',
+        });
+        this.lastError = data?.message || 'Unknown error';
+        this.notify('thoughts');
         this.notify('agents');
+        this.notify('failed');
         break;
     }
   },

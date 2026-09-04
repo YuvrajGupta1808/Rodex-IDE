@@ -24,6 +24,30 @@ _terminal_cwds: dict[str, str] = {}
 MAX_UPLOAD_FILES = 20
 MAX_UPLOAD_BYTES = 1024 * 1024  # 1 MB per file
 
+# Uploading a folder sweeps in build artefacts and vendored code. Reviewing
+# them wastes the file budget, floods the coordinator's prompt, and produces
+# findings about code the user did not write.
+_IGNORED_PATH_PARTS = frozenset({
+    "__pycache__", ".git", ".venv", "venv", "node_modules", ".mypy_cache",
+    ".pytest_cache", ".ruff_cache", "dist", "build", ".tox", "site-packages",
+    ".idea", ".vscode", "htmlcov", ".eggs",
+})
+_IGNORED_SUFFIXES = (".pyc", ".pyo", ".pyd", ".so", ".egg-info", ".map", ".lock")
+
+
+def is_reviewable(filename: str) -> bool:
+    """Whether an uploaded path is source worth reviewing."""
+    if not filename:
+        return False
+    normalised = filename.replace("\\", "/")
+    parts = normalised.split("/")
+    if any(part in _IGNORED_PATH_PARTS for part in parts):
+        return False
+    name = parts[-1]
+    if name.startswith("."):
+        return False
+    return not name.endswith(_IGNORED_SUFFIXES)
+
 
 class ReviewRequest(BaseModel):
     files: dict[str, str]  # filename -> source code
@@ -76,13 +100,19 @@ async def upload_review(
     sandbox_manager: SandboxManager = Depends(get_sandbox_manager),
     agent_drive: AgentDrive = Depends(get_agent_drive),
 ) -> ReviewResponse:
-    if len(files) > MAX_UPLOAD_FILES:
+    reviewable = [f for f in files if is_reviewable(f.filename or "")]
+    if not reviewable:
+        raise HTTPException(
+            status_code=400,
+            detail="No reviewable source files in the upload.",
+        )
+    if len(reviewable) > MAX_UPLOAD_FILES:
         raise HTTPException(
             status_code=413,
-            detail=f"Too many files: {len(files)} > {MAX_UPLOAD_FILES}",
+            detail=f"Too many files: {len(reviewable)} > {MAX_UPLOAD_FILES}",
         )
     file_contents: dict[str, str] = {}
-    for upload in files:
+    for upload in reviewable:
         content = await upload.read()
         if len(content) > MAX_UPLOAD_BYTES:
             raise HTTPException(

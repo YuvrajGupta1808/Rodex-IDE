@@ -171,6 +171,7 @@ btnRun.addEventListener('click', async () => {
   store.fixedFiles = {};
   store.activity = [];
   store._openStepId = null;
+  store.lastError = null;
   _appliedFixes.clear();
   clearFindingsUI();
 
@@ -222,6 +223,11 @@ store.subscribe((key) => {
   if (key === 'findings' || key === 'fixes') {
     renderFindings();
     applyVerifiedFixes();
+  }
+  if (key === 'failed') {
+    btnRun.classList.remove('running');
+    btnRun.textContent = 'Run Analysis';
+    renderThoughts();
   }
   if (key === 'completed') {
     btnRun.classList.remove('running');
@@ -291,19 +297,29 @@ function groupEntries(entries) {
   return groups;
 }
 
+// A long deliberation can run to hundreds of fragments. Showing every one
+// grew the panel to ~110,000px, so the auto-scroll landed the user in
+// blank space below the content. Older lines collapse behind a summary.
+const BLOCK_VISIBLE_LINES = 12;
+
 function renderTextBlock(group) {
+  const overflow = group.lines.length - BLOCK_VISIBLE_LINES;
+  const shown = overflow > 0 ? group.lines.slice(-BLOCK_VISIBLE_LINES) : group.lines;
   // The model marks its own step headers with "›"; promote them so a long
   // block can be skimmed.
-  const body = group.lines.map(line => {
+  const body = shown.map(line => {
     const text = String(line || '');
     return text.startsWith('›')
       ? `<div class="act-head">${escapeHtml(text.slice(1).trim())}</div>`
       : `<div class="act-line">${escapeHtml(text)}</div>`;
   }).join('');
   const cls = group.kind === 'reasoning' ? 'act-reasoning' : 'act-thought';
+  const more = overflow > 0
+    ? `<div class="act-more">${overflow} earlier line${overflow === 1 ? '' : 's'}</div>`
+    : '';
   return `<div class="act-block ${cls}">
       <div class="act-agent">${escapeHtml(agentLabel(group.agentId))}</div>
-      <div class="act-body">${body}</div>
+      <div class="act-body">${more}${body}</div>
     </div>`;
 }
 
@@ -336,6 +352,12 @@ function renderEntries(entries) {
           <span class="act-decision-why">${escapeHtml(entry.rationale || '')}</span>
         </div>`;
     }
+    if (entry.kind === 'failure') {
+      return `<div class="act-failure">
+          <span class="act-failure-tag">error</span>
+          <span>${escapeHtml(entry.text)}</span>
+        </div>`;
+    }
     if (entry.kind === 'retry') {
       return `<div class="act-retry">
           <span class="act-retry-tag">retry ${entry.attempt}/${entry.maxAttempts}</span>
@@ -360,7 +382,9 @@ function renderThoughts() {
   // Keep the view pinned to the newest activity unless the user scrolled up
   // to read something — yanking the scroll position mid-read is hostile.
   const pinned = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 60;
-  stream.innerHTML = renderEntries(entries.slice(-200));
+  // Render a bounded window — the store keeps the full history, but a
+  // DOM this large is both slow and unscrollable.
+  stream.innerHTML = renderEntries(entries.slice(-40));
   if (pinned) stream.scrollTop = stream.scrollHeight;
 }
 

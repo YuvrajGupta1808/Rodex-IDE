@@ -109,22 +109,32 @@ def thinking_extra_body() -> dict:
     return {}
 
 
+# A review makes many calls in quick succession, so a transient 429 from
+# the provider is normal and must not end the run. The SDK retries these
+# with exponential backoff when given a budget.
+_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "5"))
+_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "180"))
+
+
 def get_client():
     """An ``AsyncOpenAI`` client pointed at the configured provider."""
     from openai import AsyncOpenAI
 
     provider = _provider()
+    common = {"max_retries": _MAX_RETRIES, "timeout": _TIMEOUT_SECONDS}
 
     if provider == "vertex":
         return AsyncOpenAI(
             api_key=_vertex_access_token(),
             base_url=_vertex_base_url(),
+            **common,
         )
 
     if provider == "gemini":
         return AsyncOpenAI(
             api_key=os.getenv("GEMINI_API_KEY", ""),
             base_url=os.getenv("GEMINI_BASE_URL", _GEMINI_BASE_URL),
+            **common,
         )
 
-    return AsyncOpenAI()
+    return AsyncOpenAI(**common)

@@ -1081,3 +1081,36 @@
   color: var(--warn, #d29922);
   font-weight: 600;
 }
+
+/* A failed review — visible in the timeline, not just a red status dot. */
+.act-failure {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--text-secondary, #b9bec7);
+  border-left: 2px solid var(--err, #f85149);
+  background: rgba(248,81,73,0.07);
+  border-radius: 0 4px 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.act-failure-tag {
+  flex: none;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--err, #f85149);
+}
+
+/* Marker for reasoning lines collapsed out of a long block. */
+.act-more {
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  opacity: 0.75;
+  padding-bottom: 4px;
+}
