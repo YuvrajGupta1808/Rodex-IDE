@@ -1,6 +1,9 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Tests import the app as `src.*`; add the repo root to sys.path so this
+# works from a bare checkout (CI) as well as an editable local install.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
