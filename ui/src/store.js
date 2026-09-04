@@ -15,6 +15,11 @@ export const store = {
   },
   planSteps: [],     // [{step, description, status}]
   thoughts: [],      // [{agentId, text}]  (last 100)
+  // Structured activity timeline: coordinator reasoning, delegated steps,
+  // decisions and retries, in the order they happened. Steps nest the
+  // activity that occurred while they were open.
+  activity: [],      // [{kind, agentId, ...}]
+  _openStepId: null,
   toolCalls: [],     // [{agentId, toolName, inputs, output, durationMs, ok}]
   findings: [],      // Finding objects
   fixProposals: {},  // findingId -> FixProposal
@@ -54,7 +59,51 @@ export const store = {
 
       case 'thinking':
         this.thoughts = [...this.thoughts.slice(-99), { agentId: agent_id, text: data.text }];
+        this._pushActivity({ kind: 'thought', agentId: agent_id, text: data.text });
         if (data.state) this._setAgentState(agent_id, data.state);
+        this.notify('thoughts');
+        break;
+
+      case 'coordinator_reasoning':
+        this.thoughts = [...this.thoughts.slice(-99), { agentId: agent_id, text: data.text }];
+        this._pushActivity({ kind: 'reasoning', agentId: agent_id, text: data.text });
+        this.notify('thoughts');
+        break;
+
+      case 'step_started':
+        this._pushActivity({
+          kind: 'step', agentId: agent_id, stepId: data.step_id,
+          title: data.title, detail: data.detail, outcome: null,
+          summary: '', children: [],
+        });
+        this.notify('thoughts');
+        break;
+
+      case 'step_completed': {
+        const step = this._findStep(data.step_id);
+        if (step) {
+          step.outcome = data.outcome;
+          step.summary = data.summary;
+        }
+        this._openStepId = null;
+        this.notify('thoughts');
+        break;
+      }
+
+      case 'decision_made':
+        this._pushActivity({
+          kind: 'decision', agentId: agent_id,
+          choice: data.choice, rationale: data.rationale,
+        });
+        this.notify('thoughts');
+        break;
+
+      case 'retry_scheduled':
+        this._pushActivity({
+          kind: 'retry', agentId: agent_id, target: data.target,
+          attempt: data.attempt, maxAttempts: data.max_attempts,
+          reason: data.reason,
+        });
         this.notify('thoughts');
         break;
 
@@ -124,6 +173,31 @@ export const store = {
         this.notify('agents');
         break;
     }
+  },
+
+  // Activity entries land inside the currently open step when there is
+  // one, so a delegation reads as a unit of work with its own detail
+  // rather than as loose lines interleaved with everything else.
+  _pushActivity(entry) {
+    if (entry.kind === 'step') {
+      this.activity = [...this.activity, entry];
+      this._openStepId = entry.stepId;
+      return;
+    }
+    const open = this._openStepId ? this._findStep(this._openStepId) : null;
+    if (open) {
+      open.children = [...open.children, entry];
+      this.activity = [...this.activity];   // new identity so renderers update
+    } else {
+      this.activity = [...this.activity, entry];
+    }
+  },
+
+  _findStep(stepId) {
+    for (const entry of this.activity) {
+      if (entry.kind === 'step' && entry.stepId === stepId) return entry;
+    }
+    return null;
   },
 
   _setAgentState(agentId, state) {

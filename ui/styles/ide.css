@@ -944,3 +944,140 @@
 }
 
 .report-severity .badge { font-size: 10px; padding: 2px 6px; }
+
+/* ── Activity timeline ─────────────────────────────────────────────────
+   Replaces the flat one-line-per-event feed. Reasoning is grouped into
+   blocks, delegated work nests inside a collapsible step, and decisions
+   and retries are distinguishable at a glance. */
+
+.act-block {
+  display: grid;
+  grid-template-columns: 104px 1fr;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.04));
+}
+
+.act-agent {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-top: 2px;
+  user-select: none;
+}
+
+.act-body { min-width: 0; }
+
+.act-line {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-secondary, #b9bec7);
+  overflow-wrap: anywhere;
+}
+
+.act-head {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--text-primary, #e6e9ef);
+  margin-top: 4px;
+}
+.act-head:first-child { margin-top: 0; }
+
+.act-reasoning .act-agent { color: var(--accent, #6ea8fe); }
+
+/* A delegated unit of work, with its own activity nested inside. */
+.act-step {
+  margin: 8px 0;
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.08));
+  border-radius: 6px;
+  background: rgba(255,255,255,0.015);
+  overflow: hidden;
+}
+
+.act-step > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+  user-select: none;
+}
+.act-step > summary::-webkit-details-marker { display: none; }
+.act-step > summary:hover { background: rgba(255,255,255,0.03); }
+
+.act-step-badge {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  font-size: 11px;
+}
+.act-step-ok      .act-step-badge { color: var(--ok, #3fb950); }
+.act-step-failed  .act-step-badge { color: var(--err, #f85149); }
+.act-step-running .act-step-badge { color: var(--text-muted); }
+
+.act-step-title {
+  font-weight: 600;
+  color: var(--text-primary, #e6e9ef);
+}
+
+.act-step-summary {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.act-step-detail {
+  padding: 0 10px 8px 34px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.act-children {
+  padding: 2px 10px 8px 34px;
+  border-top: 1px solid var(--border-subtle, rgba(255,255,255,0.05));
+}
+.act-children .act-block { grid-template-columns: 88px 1fr; }
+
+/* A branch the coordinator chose. */
+.act-decision {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  margin: 6px 0;
+  font-size: 12px;
+  border-left: 2px solid var(--accent, #6ea8fe);
+  background: rgba(110,168,254,0.05);
+  border-radius: 0 4px 4px 0;
+}
+
+.act-decision-choice { font-weight: 600; color: var(--text-primary, #e6e9ef); }
+.act-decision-why { color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
+
+/* An attempt that is being made again after a failure. */
+.act-retry {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--text-secondary, #b9bec7);
+  border-left: 2px solid var(--warn, #d29922);
+  background: rgba(210,153,34,0.06);
+  border-radius: 0 4px 4px 0;
+}
+
+.act-retry-tag {
+  flex: none;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--warn, #d29922);
+  font-weight: 600;
+}
