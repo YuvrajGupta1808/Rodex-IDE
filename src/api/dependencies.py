@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from functools import lru_cache
 
 from ..events.bus import AsyncEventBus
 from ..sandbox.manager import SandboxManager

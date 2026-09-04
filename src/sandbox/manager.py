@@ -59,7 +59,7 @@ class SandboxManager:
                 "ttl": "1h",
             }, safe=True)
             return sandbox
-        except Exception as exc:
+        except Exception:
             return _MockSandbox(name)
 
     async def write_file(self, sandbox: Any, path: str, content: str) -> None:
@@ -220,7 +220,10 @@ class _MockProcess:
         return type("R", (), {
             "exit_code": exit_code,
             "status": "completed" if exit_code == 0 else "failed",
-            "logs": [type("L", (), {"message": l})() for l in (result.stdout + result.stderr).splitlines()],
+            "logs": [
+                type("L", (), {"message": line})()
+                for line in (result.stdout + result.stderr).splitlines()
+            ],
             "stdout": result.stdout,
             "stderr": result.stderr,
         })()
@@ -231,7 +234,7 @@ class _MockFilesystem:
         self._files = files
 
     async def write(self, path: str, content: str) -> None:
-        import os, pathlib
+        import pathlib
         self._files[path] = content
         # Also write to actual filesystem for local py_compile checks
         try:

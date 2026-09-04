@@ -4,17 +4,23 @@ import asyncio
 import time
 from typing import Any
 
-from .base_agent import BaseAgent, AgentResult, SharedContext
-from .security_agent import SecurityAgent
-from .bug_agent import BugDetectionAgent
-from .fix_agent import FixAgent
 from ..events.emitter import EventEmitter
 from ..events.schemas import (
-    EventType, Finding, FixProposal, FixVerification,
-    PlanStep, ReviewResult, Severity,
+    EventType,
+    Finding,
+    FixProposal,
+    FixVerification,
+    PlanStep,
+    ReviewResult,
+    Severity,
 )
+from ..events.telemetry import ReviewTelemetry
 from ..sandbox.manager import SandboxManager
 from ..storage.agent_drive import AgentDrive
+from .base_agent import AgentResult, BaseAgent, SharedContext
+from .bug_agent import BugDetectionAgent
+from .fix_agent import FixAgent
+from .security_agent import SecurityAgent
 
 
 class CoordinatorAgent(BaseAgent):
@@ -34,6 +40,7 @@ class CoordinatorAgent(BaseAgent):
         self.sandbox_manager = sandbox_manager
         self.agent_drive = agent_drive
         self._session_id = session_id
+        self.telemetry = ReviewTelemetry(session_id=session_id)
 
     async def analyze(self, context: SharedContext) -> AgentResult:
         raise NotImplementedError("Use run_review() instead")
@@ -78,13 +85,16 @@ class CoordinatorAgent(BaseAgent):
         fix_emitter = EventEmitter("fix", context.session_id, event_bus)
 
         security_agent = SecurityAgent(
-            "security", security_emitter, self.sandbox_manager, self.agent_drive
+            "security", security_emitter, self.sandbox_manager, self.agent_drive,
+            telemetry=self.telemetry,
         )
         bug_agent = BugDetectionAgent(
-            "bug_detection", bug_emitter, self.sandbox_manager, self.agent_drive
+            "bug_detection", bug_emitter, self.sandbox_manager, self.agent_drive,
+            telemetry=self.telemetry,
         )
         fix_agent = FixAgent(
-            "fix", fix_emitter, self.sandbox_manager, self.agent_drive
+            "fix", fix_emitter, self.sandbox_manager, self.agent_drive,
+            telemetry=self.telemetry,
         )
 
         # Attach MCP server manager: specialists gain per-agent context tools
@@ -154,10 +164,9 @@ class CoordinatorAgent(BaseAgent):
             duration_ms,
             context.files,
         )
-        await self.emitter.emit(
-            EventType.REVIEW_COMPLETED,
-            result.model_dump(mode="json", by_alias=True, exclude_none=False),
-        )
+        payload = result.model_dump(mode="json", by_alias=True, exclude_none=False)
+        payload["telemetry"] = self.telemetry.summary()
+        await self.emitter.emit(EventType.REVIEW_COMPLETED, payload)
         return result
 
     def _build_plan(self, context: SharedContext) -> list[PlanStep]:

@@ -1,0 +1,107 @@
+"""Shared helper for streaming an LLM response to the event bus.
+
+Agents stream their analysis so the UI can show progress live. Two
+concerns are handled here so every agent behaves the same way:
+
+* Providers differ in chunk size — Vertex returns a few large chunks
+  rather than per-token deltas — so text is re-split into small,
+  sentence-like fragments before being emitted.
+* The models are asked to answer with a JSON array of findings, so the
+  raw stream is unreadable. Findings are narrated as their fields
+  arrive, giving a live "found X in Y" feed instead of a JSON dump.
+"""
+
+from __future__ import annotations
+
+import re
+
+# Emit roughly a short sentence at a time: long enough to avoid flooding
+# the event bus, short enough to read as live progress.
+_FRAGMENT_CHARS = 100
+_SENTENCE_END = re.compile(r"(?<=[.!?;:])\s+")
+
+
+def _readable_fragments(text: str) -> list[str]:
+    """Split text into small fragments suitable for a progress feed."""
+    fragments: list[str] = []
+    for sentence in _SENTENCE_END.split(text):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        while len(sentence) > _FRAGMENT_CHARS:
+            cut = sentence.rfind(" ", 0, _FRAGMENT_CHARS)
+            if cut <= 0:
+                cut = _FRAGMENT_CHARS
+            fragments.append(sentence[:cut].strip())
+            sentence = sentence[cut:].strip()
+        if sentence:
+            fragments.append(sentence)
+    return fragments
+
+
+class _FindingNarrator:
+    """Turns a streaming JSON findings array into readable progress lines.
+
+    The models emit one object per finding. Rather than showing raw JSON,
+    each finding is announced once enough of its fields have arrived.
+    """
+
+    _SEVERITY = re.compile(r'"severity"\s*:\s*"([^"]+)"')
+    _CATEGORY = re.compile(r'"category"\s*:\s*"([^"]+)"')
+    _LINE = re.compile(r'"line"\s*:\s*(\d+)')
+    _DESCRIPTION = re.compile(r'"description"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+    def __init__(self) -> None:
+        self._announced = 0
+
+    def new_lines(self, text: str) -> list[str]:
+        """Progress lines for findings that are complete but unannounced."""
+        descriptions = self._DESCRIPTION.findall(text)
+        severities = self._SEVERITY.findall(text)
+        categories = self._CATEGORY.findall(text)
+        lines_no = self._LINE.findall(text)
+
+        out: list[str] = []
+        while self._announced < len(descriptions):
+            i = self._announced
+            severity = severities[i].upper() if i < len(severities) else "ISSUE"
+            category = categories[i].replace("_", " ") if i < len(categories) else "finding"
+            where = f" (line {lines_no[i]})" if i < len(lines_no) else ""
+            description = descriptions[i].encode().decode("unicode_escape")
+            out.append(f"[{severity}] {category}{where}: {description}")
+            self._announced += 1
+        return out
+
+
+async def stream_thinking(stream, emitter, on_usage=None) -> str:
+    """Consume an OpenAI-style stream, emitting readable progress.
+
+    Returns the full raw response so the caller can parse findings.
+    ``on_usage`` receives the provider's usage object when one is sent
+    (providers report it on a final, choice-less chunk).
+    """
+    full_response = ""
+    narrator = _FindingNarrator()
+
+    async for chunk in stream:
+        usage = getattr(chunk, "usage", None)
+        if usage is not None and on_usage is not None:
+            on_usage(usage)
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta.content or ""
+        if not delta:
+            continue
+        full_response += delta
+        for line in narrator.new_lines(full_response):
+            for fragment in _readable_fragments(line):
+                await emitter.thinking(fragment)
+
+    for line in narrator.new_lines(full_response):
+        for fragment in _readable_fragments(line):
+            await emitter.thinking(fragment)
+
+    if not narrator._announced:
+        await emitter.thinking("No issues found.")
+
+    return full_response

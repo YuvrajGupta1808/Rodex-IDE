@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
-from .base_agent import BaseAgent, AgentResult, SharedContext
 from ..events.schemas import Finding, Severity
+from .base_agent import AgentResult, BaseAgent, SharedContext
 
 SYSTEM_PROMPT = """You are a specialized bug detection expert for Python code.
 
@@ -78,34 +79,33 @@ class BugDetectionAgent(BaseAgent):
         return AgentResult(agent_id=self.agent_id, findings=findings)
 
     async def _run_with_streaming(self, context: SharedContext, files_text: str) -> str:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI()
+        from .llm_client import get_client, get_model
+        from .streaming import stream_thinking
+        client = get_client()
+        model = get_model()
 
         await self.emitter.thinking("Checking for null/None dereferences and logic errors...")
-        await self.emitter.tool_call_start("openai.chat", {"model": "gpt-4o", "focus": "bugs"})
+        await self.emitter.tool_call_start("openai.chat", {"model": model, "focus": "bugs"})
 
-        full_response = ""
         stream = await client.chat.completions.create(
-            model="gpt-4o",
+            model=model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": f"Analyze these Python files for bugs and logic errors:\n\n{files_text}"},
             ],
             stream=True,
             temperature=0,
+            stream_options={"include_usage": True},
         )
 
-        chunk_buffer = ""
-        async for chunk in stream:
-            delta = chunk.choices[0].delta.content or ""
-            full_response += delta
-            chunk_buffer += delta
-            if len(chunk_buffer) > 80:
-                await self.emitter.thinking(chunk_buffer.strip())
-                chunk_buffer = ""
-
-        if chunk_buffer.strip():
-            await self.emitter.thinking(chunk_buffer.strip())
+        started = time.monotonic()
+        full_response = await stream_thinking(
+            stream,
+            self.emitter,
+            on_usage=lambda usage: self.telemetry.record_usage(
+                self.agent_id, model, usage, int((time.monotonic() - started) * 1000)
+            ),
+        )
 
         await self.emitter.tool_call_result("openai.chat", f"{len(full_response)} chars", 0)
         return full_response

@@ -15,7 +15,7 @@ import json
 import os
 import sys
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -109,10 +109,10 @@ def compute_file_metrics(
 
 
 async def evaluate_file(filename: str, content: str, expected: list[dict]) -> FileMetrics:
-    from src.review.session import ReviewSession
     from src.agents.coordinator import CoordinatorAgent
     from src.events.bus import AsyncEventBus
     from src.events.emitter import EventEmitter
+    from src.review.session import ReviewSession
     from src.sandbox.manager import SandboxManager
     from src.storage.agent_drive import AgentDrive
 

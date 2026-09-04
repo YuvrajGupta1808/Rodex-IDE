@@ -4,13 +4,11 @@ import ast
 import json
 import re
 import time
-import uuid
 from typing import Any
 
-from .base_agent import BaseAgent, AgentResult, SharedContext
 from ..events.schemas import Finding, FixProposal, FixVerification
-from ..sandbox.codegen import CodegenTools
-from ..sandbox.manager import SandboxManager
+from .base_agent import AgentResult, BaseAgent, SharedContext
+from .fix_verification import pattern_removed
 
 FIX_SYSTEM_PROMPT = """You are an expert Python code fixer.
 
@@ -106,10 +104,10 @@ class FixAgent(BaseAgent):
         t0 = time.monotonic()
 
         try:
-            from openai import AsyncOpenAI
-            client = AsyncOpenAI()
+            from .llm_client import get_client, get_model
+            client = get_client()
             response = await client.chat.completions.create(
-                model="gpt-4o",
+                model=get_model(),
                 messages=[
                     {"role": "system", "content": FIX_SYSTEM_PROMPT},
                     {
@@ -123,6 +121,9 @@ class FixAgent(BaseAgent):
                     },
                 ],
                 temperature=0,
+            )
+            self.telemetry.record_response(
+                self.agent_id, get_model(), response, int((time.monotonic() - t0) * 1000)
             )
             raw = response.choices[0].message.content or "{}"
         except Exception as exc:
@@ -187,10 +188,10 @@ class FixAgent(BaseAgent):
         end = min(len(lines), finding.line + 12)
         numbered = "\n".join(f"{i+start+1:3d}: {lines[i+start]}" for i in range(end - start))
         try:
-            from openai import AsyncOpenAI
-            client = AsyncOpenAI()
+            from .llm_client import get_client, get_model
+            client = get_client()
             response = await client.chat.completions.create(
-                model="gpt-4o",
+                model=get_model(),
                 messages=[
                     {"role": "system", "content": FIX_SYSTEM_PROMPT},
                     {
@@ -275,7 +276,21 @@ class FixAgent(BaseAgent):
 
         duration_ms = int((time.monotonic() - t0) * 1000)
         output = (result.stdout + result.stderr).strip()
-        passed = "__SYNTAX_OK__" in output or (result.success and not result.stderr.strip())
+        compiles = "__SYNTAX_OK__" in output or (result.success and not result.stderr.strip())
+
+        # Compiling only proves the file still parses. Where we have a
+        # checker for the flagged category, also require that the pattern
+        # actually went away — otherwise a syntactically valid no-op fix
+        # would be recorded as verified.
+        removed = pattern_removed(source, patched, finding.category)
+        passed = compiles and removed is not False
+        if compiles and removed is False:
+            output = (
+                f"{output}\n__PATTERN_REMAINS__: the {finding.category} pattern is "
+                "still present after the fix"
+            ).strip()
+        elif compiles and removed is True:
+            output = f"{output}\n__PATTERN_REMOVED__".strip()
 
         if not passed:
             # Rollback
@@ -316,8 +331,8 @@ class FixAgent(BaseAgent):
             indent = len(source_lines[prefix_lines]) - len(source_lines[prefix_lines].lstrip())
             indent_str = " " * indent
             repl_lines = [
-                indent_str + l.lstrip() if l.strip() else l
-                for l in replacement.splitlines()
+                indent_str + line.lstrip() if line.strip() else line
+                for line in replacement.splitlines()
             ]
             new_lines = (
                 source_lines[:prefix_lines]
@@ -328,7 +343,7 @@ class FixAgent(BaseAgent):
 
         # 3. Strip-normalized line-by-line match (ignores indentation entirely)
         orig_lines = original.splitlines()
-        orig_stripped = [l.strip() for l in orig_lines if l.strip()]
+        orig_stripped = [line.strip() for line in orig_lines if line.strip()]
         if orig_stripped:
             for i in range(len(source_lines) - len(orig_stripped) + 1):
                 window = [source_lines[i + j].strip() for j in range(len(orig_stripped))]
@@ -336,8 +351,8 @@ class FixAgent(BaseAgent):
                     indent = len(source_lines[i]) - len(source_lines[i].lstrip())
                     indent_str = " " * indent
                     repl_lines = [
-                        indent_str + l.lstrip() if l.strip() else l
-                        for l in replacement.splitlines()
+                        indent_str + line.lstrip() if line.strip() else line
+                        for line in replacement.splitlines()
                     ]
                     new_lines = source_lines[:i] + repl_lines + source_lines[i + len(orig_stripped):]
                     return "\n".join(new_lines)
@@ -347,7 +362,10 @@ class FixAgent(BaseAgent):
         if 0 <= target_line < len(source_lines):
             indent = len(source_lines[target_line]) - len(source_lines[target_line].lstrip())
             indent_str = " " * indent
-            repl_lines = [indent_str + l.lstrip() if l.strip() else l for l in replacement.splitlines()]
+            repl_lines = [
+                indent_str + line.lstrip() if line.strip() else line
+                for line in replacement.splitlines()
+            ]
             new_lines = source_lines[:target_line] + repl_lines + source_lines[target_line + 1:]
             return "\n".join(new_lines)
 

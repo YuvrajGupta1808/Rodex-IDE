@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import time
 from typing import Any
 
@@ -73,10 +72,10 @@ class CodegenTools:
     ) -> str:
         """Use OpenAI to apply the instruction to the file content."""
         try:
-            from openai import AsyncOpenAI
-            client = AsyncOpenAI()
+            from ..agents.llm_client import get_client, get_model
+            client = get_client()
             response = await client.chat.completions.create(
-                model="gpt-4o",
+                model=get_model(),
                 messages=[
                     {
                         "role": "system",

@@ -7,12 +7,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
+from .dependencies import get_agent_drive, get_volume_store
 from .routes.review import router as review_router
 from .routes.stream import router as stream_router
-from .dependencies import get_agent_drive, get_volume_store
 
 load_dotenv()
 

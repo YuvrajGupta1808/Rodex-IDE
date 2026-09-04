@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
-from ..dependencies import get_event_bus
 from ...events.bus import AsyncEventBus
+from ..dependencies import get_event_bus
 
 router = APIRouter(prefix="/api", tags=["stream"])
 
