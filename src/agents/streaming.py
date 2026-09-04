@@ -105,3 +105,23 @@ async def stream_thinking(stream, emitter, on_usage=None) -> str:
         await emitter.thinking("No issues found.")
 
     return full_response
+
+
+def summarize_response(raw: str, usage=None) -> str:
+    """One-line summary of an LLM response for the tool log.
+
+    The log previously showed only a character count, which said nothing
+    about what the call actually produced.
+    """
+    findings = len(_FindingNarrator._DESCRIPTION.findall(raw))
+    parts = [f"{findings} finding{'' if findings == 1 else 's'}"]
+    if usage is not None:
+        prompt = getattr(usage, "prompt_tokens", 0) or 0
+        completion = getattr(usage, "completion_tokens", 0) or 0
+        parts.append(f"{prompt}+{completion} tok")
+        details = getattr(usage, "completion_tokens_details", None)
+        reasoning = getattr(details, "reasoning_tokens", 0) or 0 if details else 0
+        if reasoning:
+            parts.append(f"{reasoning} reasoning")
+    parts.append(f"{len(raw)} chars")
+    return " · ".join(parts)

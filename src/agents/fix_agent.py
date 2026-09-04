@@ -97,8 +97,10 @@ class FixAgent(BaseAgent):
         end = min(len(lines), finding.line + 12)
         numbered = "\n".join(f"{i+start+1:3d}: {lines[i+start]}" for i in range(end - start))
 
+        from .llm_client import tool_name
+        fix_tool = tool_name("fix_generation")
         await self.emitter.tool_call_start(
-            "openai.fix_generation",
+            fix_tool,
             {"file": finding.file, "line": finding.line, "category": finding.category},
         )
         t0 = time.monotonic()
@@ -131,7 +133,7 @@ class FixAgent(BaseAgent):
             return None
 
         duration_ms = int((time.monotonic() - t0) * 1000)
-        await self.emitter.tool_call_result("openai.fix_generation", raw[:200], duration_ms)
+        await self.emitter.tool_call_result(fix_tool, raw[:200], duration_ms)
 
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if not match:

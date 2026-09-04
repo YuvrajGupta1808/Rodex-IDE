@@ -92,6 +92,11 @@ def _vertex_base_url() -> str:
     )
 
 
+def tool_name(action: str = "chat") -> str:
+    """Provider-qualified tool name for the event log, e.g. "vertex.chat"."""
+    return f"{_provider()}.{action}"
+
+
 def get_client():
     """An ``AsyncOpenAI`` client pointed at the configured provider."""
     from openai import AsyncOpenAI

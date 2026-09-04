@@ -75,13 +75,14 @@ class SecurityAgent(BaseAgent):
         return AgentResult(agent_id=self.agent_id, findings=findings)
 
     async def _run_with_streaming(self, context: SharedContext, files_text: str) -> str:
-        from .llm_client import get_client, get_model
-        from .streaming import stream_thinking
+        from .llm_client import get_client, get_model, tool_name
+        from .streaming import stream_thinking, summarize_response
         client = get_client()
         model = get_model()
 
         await self.emitter.thinking("Scanning for SQL injection patterns...")
-        await self.emitter.tool_call_start("openai.chat", {"model": model, "focus": "security"})
+        tool = tool_name()
+        await self.emitter.tool_call_start(tool, {"model": model, "focus": "security"})
 
         stream = await client.chat.completions.create(
             model=model,
@@ -95,15 +96,24 @@ class SecurityAgent(BaseAgent):
         )
 
         started = time.monotonic()
+        usage_holder: dict = {}
+
+        def _record(usage):
+            usage_holder["usage"] = usage
+            self.telemetry.record_usage(
+                self.agent_id, model, usage, int((time.monotonic() - started) * 1000)
+            )
+
         full_response = await stream_thinking(
             stream,
             self.emitter,
-            on_usage=lambda usage: self.telemetry.record_usage(
-                self.agent_id, model, usage, int((time.monotonic() - started) * 1000)
-            ),
+            on_usage=_record,
         )
 
-        await self.emitter.tool_call_result("openai.chat", f"{len(full_response)} chars", 0)
+        duration_ms = int((time.monotonic() - started) * 1000)
+        await self.emitter.tool_call_result(
+            tool, summarize_response(full_response, usage_holder.get("usage")), duration_ms
+        )
         return full_response
 
     def _parse_findings(self, raw: str, context: SharedContext) -> list[Finding]:

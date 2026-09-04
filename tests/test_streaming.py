@@ -109,3 +109,38 @@ async def test_chunks_without_choices_are_skipped():
     await stream_thinking(_WithEmpty(RESPONSE, 50), emitter)
 
     assert any("[CRITICAL]" in m for m in emitter.messages)
+
+
+class _StubUsage:
+    prompt_tokens = 526
+    completion_tokens = 129
+
+    class completion_tokens_details:  # noqa: N801 - mimics the SDK shape
+        reasoning_tokens = 592
+
+
+def test_summary_reports_findings_and_tokens():
+    from src.agents.streaming import summarize_response
+
+    summary = summarize_response(RESPONSE, _StubUsage())
+
+    # The log previously showed only "N chars", which said nothing useful.
+    assert "2 findings" in summary
+    assert "526+129 tok" in summary
+    assert "592 reasoning" in summary
+
+
+def test_summary_without_usage_still_counts_findings():
+    from src.agents.streaming import summarize_response
+
+    summary = summarize_response(RESPONSE)
+
+    assert "2 findings" in summary
+    assert "tok" not in summary
+
+
+def test_summary_singular_finding():
+    from src.agents.streaming import summarize_response
+
+    one = '[{"description": "only one"}]'
+    assert "1 finding ·" in summarize_response(one)
