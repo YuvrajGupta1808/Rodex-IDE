@@ -177,9 +177,6 @@ report `0.0` rather than guessing.
 `ui/` is the application — a dependency-free ES-module frontend (Monaco editor,
 agent panel, SSE client) served directly by FastAPI, so there is no build step.
 
-`ui-react/` is a separate, optional Clerk authentication shell that front-doors
-the app; it is not required to run Rodex and is not served by the API.
-
 ## Testing
 
 ```bash

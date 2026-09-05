@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in — Rodex</title>
+  <link rel="stylesheet" href="/styles/base.css" />
+  <link rel="stylesheet" href="/styles/landing.css" />
+  <style>
+    .auth-box {
+      max-width: 360px;
+      margin: 12vh auto 0;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      text-align: center;
+    }
+    .auth-box input {
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.05);
+      color: inherit;
+      font-size: 14px;
+    }
+    .auth-msg {
+      font-size: 13px;
+      opacity: 0.8;
+      min-height: 18px;
+    }
+    .auth-msg.error { color: #f87171; }
+    .auth-msg.ok { color: #4ade80; }
+  </style>
+</head>
+<body class="landing-body">
+
+  <div class="landing-logo">
+    <div class="landing-logo-icon">⬡</div>
+    <h1>Rodex</h1>
+    <p>Sign in to continue</p>
+  </div>
+
+  <div class="auth-box" id="auth-box">
+    <input type="email" id="email-input" placeholder="you@example.com" autocomplete="email" />
+    <button class="btn-analyze" id="btn-send-link">Send me a sign-in link</button>
+    <div class="auth-msg" id="auth-msg"></div>
+  </div>
+
+  <script type="module" src="/ui/login.js"></script>
+</body>
+</html>
