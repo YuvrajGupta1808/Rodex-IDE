@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
 SESSION_COOKIE_NAME = "rodex_session"
 SESSION_MAX_AGE_SECONDS = 14 * 24 * 60 * 60  # 14 days
@@ -15,8 +16,15 @@ SESSION_MAX_AGE_SECONDS = 14 * 24 * 60 * 60  # 14 days
 _PUBLIC_PATHS = {"/health", "/login", "/favicon.ico"}
 _PUBLIC_PREFIXES = ("/login/", "/auth/", "/ui/login", "/styles/")
 
-if not firebase_admin._apps:
-    firebase_admin.initialize_app()
+
+def auth_disabled() -> bool:
+    """Local-dev escape hatch. Never set this in a deployed environment."""
+    return os.getenv("RODEX_DISABLE_AUTH") == "1"
+
+
+def _ensure_firebase_app() -> None:
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app()
 
 
 def _serializer() -> URLSafeTimedSerializer:
@@ -26,6 +34,7 @@ def _serializer() -> URLSafeTimedSerializer:
 
 def create_session_cookie(id_token: str) -> str:
     """Verify a Firebase ID token and mint our own signed session token."""
+    _ensure_firebase_app()
     decoded = firebase_auth.verify_id_token(id_token)
     email = decoded.get("email")
     if not email:
@@ -49,8 +58,16 @@ def _is_public(path: str) -> bool:
 class SessionAuthMiddleware(BaseHTTPMiddleware):
     """Gates every route behind a signed session cookie, except login/health."""
 
+    def __init__(self, app):
+        super().__init__(app)
+        if auth_disabled():
+            logging.getLogger(__name__).warning(
+                "RODEX_DISABLE_AUTH=1 — every route is unauthenticated. "
+                "This is for local development only."
+            )
+
     async def dispatch(self, request: Request, call_next):
-        if _is_public(request.url.path):
+        if auth_disabled() or _is_public(request.url.path):
             return await call_next(request)
 
         cookie = request.cookies.get(SESSION_COOKIE_NAME)

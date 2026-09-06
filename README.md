@@ -12,6 +12,8 @@ compile *and* provably remove the flagged pattern before it is recorded.
 Runs on **Gemini 2.5 Pro** (Vertex AI), **Gemini** (API key), or **OpenAI GPT-4o** —
 the provider is one environment variable.
 
+![Rodex reviewing a file: the Security agent flags SQL injection and unsafe deserialization, and the Fix agent patches them](docs/assets/rodex-demo.gif)
+
 ## Features
 
 - **Cursor IDE UI** — Monaco editor, file tree, live agent panel, findings feed
